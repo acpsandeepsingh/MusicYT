@@ -65,6 +65,7 @@ export default function App() {
   }, [likedSongs]);
 
   useEffect(() => {
+    if (!auth) return;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
         // Fetch Liked Songs
@@ -98,6 +99,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!db) {
+      setLoading(false);
+      return;
+    }
     const unsubscribes = GENRES.map((genre) => {
       // Try to fetch from api_cache collection where doc ID is the genre
       return onSnapshot(doc(db, 'api_cache', genre.id), async (snapshot) => {
