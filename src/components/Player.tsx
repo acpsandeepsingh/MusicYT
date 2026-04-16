@@ -31,7 +31,7 @@ export default function Player() {
   const [playerType, setPlayerType] = useState<'audio' | 'youtube'>('audio');
   const [showQueue, setShowQueue] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const [isUserInactive, setIsUserInactive] = useState(false);
   const canUnmute = useRef<boolean>(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -168,14 +168,10 @@ export default function Player() {
     console.log('User toggled play/pause');
     setHasInteracted(true);
     canUnmute.current = true;
-    setIsStuck(false);
     
     if (player && playerType === 'youtube') {
       try {
         if (!isPlaying) {
-          player.unMute();
-          setIsMuted(false);
-          player.setVolume(volume * 100);
           player.playVideo();
         } else {
           player.pauseVideo();
@@ -193,6 +189,56 @@ export default function Player() {
     
     togglePlay();
   };
+
+  useEffect(() => {
+    if (!currentSong || !('mediaSession' in navigator)) return;
+
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.title,
+        artist: currentSong.artist,
+        album: currentSong.album || '',
+        artwork: [
+          { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/png' },
+          { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/png' },
+          { src: getSongCoverUrl(currentSong, 'hqdefault'), sizes: '192x192', type: 'image/png' },
+          { src: getSongCoverUrl(currentSong, 'sddefault'), sizes: '256x256', type: 'image/png' },
+          { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/png' },
+        ],
+      });
+
+      // Update playback state immediately to hint background survival
+      navigator.mediaSession.playbackState = 'playing';
+
+      navigator.mediaSession.setActionHandler('play', () => {
+        handleTogglePlay();
+      });
+      navigator.mediaSession.setActionHandler('pause', () => {
+        handleTogglePlay();
+      });
+      navigator.mediaSession.setActionHandler('previoustrack', previous);
+      navigator.mediaSession.setActionHandler('nexttrack', next);
+      
+      // Stop track handler - helps browser know we want to continue
+      navigator.mediaSession.setActionHandler('stop', () => {
+        if (isPlaying) handleTogglePlay();
+      });
+
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) {
+          handleSeek(details.seekTime);
+        }
+      });
+    } catch (error) {
+      console.warn('Media Session Error:', error);
+    }
+  }, [currentSong, isPlaying, next, previous]);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -339,22 +385,22 @@ export default function Player() {
     if (isPlaying && playerType === 'youtube') {
       setTimeout(() => {
         try {
-          console.log('Attempting muted autoplay in onReady');
-          event.target.mute();
-          event.target.playVideo();
-          
           if (hasInteracted) {
+            console.log('Attempting unmuted autoplay in onReady (user interacted)');
+            event.target.playVideo();
+            // Fallback: if it's still muted 
             setTimeout(() => {
-              console.log('Unmuting after delay in onReady');
-              lastUnmuteAttempt.current = Date.now();
-              event.target.unMute();
-              event.target.setVolume(volume * 100);
-            }, 1500);
+              if (event.target.isMuted()) event.target.unMute();
+            }, 500);
+          } else {
+            console.log('Attempting muted autoplay in onReady (no interaction)');
+            event.target.mute();
+            event.target.playVideo();
           }
         } catch (e) {
           console.error('Error playing video in onReady:', e);
         }
-      }, 200);
+      }, 100);
     }
   };
 
@@ -394,21 +440,13 @@ export default function Player() {
       setDuration(event.target.getDuration());
       
       if (hasInteracted && canUnmute.current) {
-        setTimeout(() => {
-          try {
-            if (event.target.isMuted() && canUnmute.current) {
-              console.log('Unmuting after delay in onStateChange');
-              lastUnmuteAttempt.current = Date.now();
-              event.target.unMute();
-              setIsMuted(false);
-              event.target.setVolume(volume * 100);
-            } else if (!event.target.isMuted()) {
-              setIsMuted(false);
-            }
-          } catch (e) {}
-        }, 1500);
-      } else {
-        setIsMuted(true);
+        // Quick unmute if user has already interacted
+        try {
+          if (event.target.isMuted()) {
+            event.target.unMute();
+            setIsMuted(false);
+          }
+        } catch (e) {}
       }
     }
 
@@ -521,8 +559,8 @@ export default function Player() {
       ref={playerContainerRef}
       onContextMenu={handleContextMenu}
       className={cn(
-        "fixed bottom-0 left-0 right-0 z-50 transition-all duration-500",
-        playerMode === 'video' ? "fullscreen-target h-screen bg-black" : "h-24 bg-black/80 backdrop-blur-2xl border-t border-white/5",
+        "fixed left-0 right-0 z-50 transition-all duration-500",
+        playerMode === 'video' ? "fullscreen-target inset-0 h-screen bg-black" : "bottom-16 md:bottom-0 h-24 bg-black/80 backdrop-blur-2xl border-t border-white/5",
         isUserInactive && playerMode === 'video' && "user-inactive"
       )}
     >
@@ -569,10 +607,10 @@ export default function Player() {
       )}>
         {/* Player Container - Hidden in audio mode, fullscreen in video mode */}
         <div className={cn(
-          "transition-all duration-700 ease-in-out overflow-hidden",
+          "transition-all duration-700 ease-in-out overflow-hidden pointer-events-none",
           playerMode === 'video' 
-            ? "fixed inset-0 w-screen h-screen z-10 bg-black" 
-            : "fixed -top-[1000px] -left-[1000px] w-[1px] h-[1px] opacity-0 pointer-events-none"
+            ? "fixed inset-0 w-screen h-screen z-10 bg-black pointer-events-auto" 
+            : "fixed -top-[2000px] -left-[2000px] w-[1px] h-[1px] opacity-0"
         )}>
           <div className={playerType === 'youtube' ? 'w-full h-full' : 'hidden'}>
             <YouTube 
@@ -584,6 +622,9 @@ export default function Player() {
                 playerVars: {
                   ...opts.playerVars,
                   controls: playerMode === 'video' ? 1 : 0,
+                  origin: window.location.origin,
+                  enablejsapi: 1,
+                  playsinline: 1, // Required for background survival on mobile browsers
                 }
               }} 
               onReady={onPlayerReady} 
