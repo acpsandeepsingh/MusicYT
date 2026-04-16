@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Publicly readable collections
+    match /genre-bollywood/{id} { allow read: if true; }
+    match /genre-classical/{id} { allow read: if true; }
+    match /genre-ghazal/{id} { allow read: if true; }
+    match /genre-indi-pop/{id} { allow read: if true; }
+    match /genre-new-songs/{id} { allow read: if true; }
+    match /genre-punjabi/{id} { allow read: if true; }
+    match /genre-sufi/{id} { allow read: if true; }
+    match /api_cache/{id} { allow read: if true; }
+    match /songs/{id} { allow read: if true; }
+
+    // User-specific data: Owner has full access to their document and all subcollections
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      match /{allPaths=**} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}

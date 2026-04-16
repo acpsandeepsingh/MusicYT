@@ -1,0 +1,7 @@
+{
+  "name": "HarmonyStream",
+  "description": "A modern, high-fidelity music streaming platform with real-time Firestore synchronization and YouTube-based playback.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

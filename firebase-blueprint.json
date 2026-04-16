@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "Song": {
+      "title": "Song",
+      "description": "A music track in the library",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "duration": { "type": "number" },
+        "coverUrl": { "type": "string" },
+        "audioUrl": { "type": "string" }
+      },
+      "required": ["title", "artist", "audioUrl"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User specific data and preferences",
+      "type": "object",
+      "properties": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "favoriteSongs": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "Playlist": {
+      "title": "Playlist",
+      "description": "A user-created collection of songs",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "userId": { "type": "string" },
+        "songs": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "coverUrl": { "type": "string" }
+      },
+      "required": ["name", "userId"]
+    }
+  },
+  "firestore": {
+    "/songs/{songId}": {
+      "schema": "Song",
+      "description": "Public song library"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Private user profiles"
+    },
+    "/users/{userId}/playlists/{playlistId}": {
+      "schema": "Playlist",
+      "description": "User-specific playlists"
+    },
+    "/users/{userId}/playlists/{playlistId}/songs/{songId}": {
+      "schema": "Song",
+      "description": "Songs within a specific playlist"
+    },
+    "/users/{userId}/liked-songs/{songId}": {
+      "schema": "Song",
+      "description": "User's liked songs"
+    },
+    "/api_cache/{genreId}": {
+      "schema": "object",
+      "description": "Cached data for genres"
+    },
+    "/genre-bollywood/{songId}": { "schema": "Song", "description": "Bollywood songs" },
+    "/genre-classical/{songId}": { "schema": "Song", "description": "Classical songs" },
+    "/genre-ghazal/{songId}": { "schema": "Song", "description": "Ghazal songs" },
+    "/genre-indi-pop/{songId}": { "schema": "Song", "description": "Indi Pop songs" },
+    "/genre-new-songs/{songId}": { "schema": "Song", "description": "New songs" },
+    "/genre-punjabi/{songId}": { "schema": "Song", "description": "Punjabi songs" },
+    "/genre-sufi/{songId}": { "schema": "Song", "description": "Sufi songs" }
+  }
+}
