@@ -194,10 +194,12 @@ export default function Player() {
     if (!currentSong || !('mediaSession' in navigator)) return;
 
     try {
+      console.log('Registering Media Session Actions for:', currentSong.title);
+      
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
         artist: currentSong.artist,
-        album: currentSong.album || '',
+        album: currentSong.album || 'Harmony Stream',
         artwork: [
           { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/png' },
           { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/png' },
@@ -207,23 +209,32 @@ export default function Player() {
         ],
       });
 
-      // Update playback state immediately to hint background survival
-      navigator.mediaSession.playbackState = 'playing';
+      // Update position state
+      if (duration > 0) {
+        navigator.mediaSession.setPositionState({
+          duration: duration,
+          playbackRate: 1,
+          position: progress
+        });
+      }
 
       navigator.mediaSession.setActionHandler('play', () => {
-        handleTogglePlay();
+        if (!isPlaying) handleTogglePlay();
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        handleTogglePlay();
-      });
-      navigator.mediaSession.setActionHandler('previoustrack', previous);
-      navigator.mediaSession.setActionHandler('nexttrack', next);
-      
-      // Stop track handler - helps browser know we want to continue
-      navigator.mediaSession.setActionHandler('stop', () => {
         if (isPlaying) handleTogglePlay();
       });
-
+      
+      // Crucial: Use refs or stable functions to avoid stale closures in event handlers
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        console.log('MediaSession: NextTrack');
+        previous();
+      });
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        console.log('MediaSession: NextTrack');
+        next();
+      });
+      
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) {
           handleSeek(details.seekTime);
@@ -232,7 +243,7 @@ export default function Player() {
     } catch (error) {
       console.warn('Media Session Error:', error);
     }
-  }, [currentSong, isPlaying, next, previous]);
+  }, [currentSong, duration, next, previous]); // Remove isPlaying to prevent constant re-registration
 
   useEffect(() => {
     if ('mediaSession' in navigator) {
@@ -602,8 +613,8 @@ export default function Player() {
       </AnimatePresence>
 
       <div className={cn(
-        "flex items-center justify-between px-6 transition-all duration-500",
-        playerMode === 'video' ? "absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-black/90 to-transparent z-20" : "h-full"
+        "flex flex-col md:flex-row items-center justify-between px-4 md:px-6 transition-all duration-500 gap-4 md:gap-0 py-4 md:py-0",
+        playerMode === 'video' ? "absolute bottom-0 left-0 right-0 h-auto md:h-24 bg-gradient-to-t from-black/95 via-black/80 to-transparent z-20" : "h-full"
       )}>
         {/* Player Container - Hidden in audio mode, fullscreen in video mode */}
         <div className={cn(
@@ -647,8 +658,8 @@ export default function Player() {
 
         {/* Song Info */}
         <div className={cn(
-          "flex items-center gap-4 transition-all duration-500",
-          playerMode === 'video' ? "w-1/4" : "w-1/3"
+          "flex items-center gap-4 transition-all duration-500 w-full md:w-1/3",
+          playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
         )}>
           <motion.img 
             key={currentSong.id}
@@ -656,36 +667,36 @@ export default function Player() {
             animate={{ scale: 1, opacity: 1 }}
             src={getSongCoverUrl(currentSong)} 
             alt={currentSong.title}
-            className="w-14 h-14 rounded-lg shadow-lg object-cover"
+            className="w-12 h-12 md:w-14 md:h-14 rounded-lg shadow-lg object-cover flex-shrink-0"
             referrerPolicy="no-referrer"
           />
-          <div className="overflow-hidden">
-            <h4 className="font-semibold text-sm hover:underline cursor-pointer truncate">{currentSong.title}</h4>
-            <p className="text-xs text-zinc-400 hover:underline cursor-pointer truncate">{currentSong.artist}</p>
+          <div className="overflow-hidden flex-1">
+            <h4 className="font-semibold text-xs md:text-sm hover:underline cursor-pointer truncate">{currentSong.title}</h4>
+            <p className="text-[10px] md:text-xs text-zinc-400 hover:underline cursor-pointer truncate">{currentSong.artist}</p>
           </div>
         </div>
 
         {/* Controls */}
         <div className={cn(
-          "flex flex-col items-center gap-2 transition-all duration-500",
-          playerMode === 'video' ? "w-2/4" : "w-1/3"
+          "flex flex-col items-center gap-2 transition-all duration-500 w-full md:w-1/3",
+          playerMode === 'video' ? "md:w-2/4" : "md:w-1/3"
         )}>
-          <div className="flex items-center gap-6">
-            <button className="text-zinc-400 hover:text-white transition-colors"><Shuffle size={18} /></button>
+          <div className="flex items-center gap-6 md:gap-8">
+            <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Shuffle size={18} /></button>
             <button onClick={previous} className="text-zinc-400 hover:text-white transition-colors"><SkipBack size={24} fill="currentColor" /></button>
             <button 
               onClick={handleTogglePlay}
-              className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition-transform active:scale-95"
+              className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition-transform active:scale-95"
             >
-              {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
+              {isPlaying ? <Pause size={24} md:size={28} fill="currentColor" /> : <Play size={24} md:size={28} fill="currentColor" className="ml-1" />}
             </button>
             <button onClick={next} className="text-zinc-400 hover:text-white transition-colors"><SkipForward size={24} fill="currentColor" /></button>
-            <button className="text-zinc-400 hover:text-white transition-colors"><Repeat size={18} /></button>
+            <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Repeat size={18} /></button>
           </div>
           
           <div className="flex items-center gap-3 w-full max-w-md">
-            <span className="text-[10px] text-zinc-500 font-mono w-8 text-right">{formatTime(progress)}</span>
-            <div className="relative flex-1 h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
+            <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8 text-right">{formatTime(progress)}</span>
+            <div className="relative flex-1 h-1.5 md:h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
               <div 
                 className="absolute top-0 left-0 h-full bg-[#ff4e00] group-hover:bg-[#ff6a2a]" 
                 style={{ width: `${(progress / (duration || 1)) * 100}%` }}
@@ -700,32 +711,34 @@ export default function Player() {
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
             </div>
-            <span className="text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
+            <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
           </div>
         </div>
 
         {/* Volume & Extra */}
         <div className={cn(
-          "flex items-center justify-end gap-4 transition-all duration-500",
-          playerMode === 'video' ? "w-1/4" : "w-1/3"
+          "flex items-center justify-center md:justify-end gap-6 md:gap-4 transition-all duration-500 w-full md:w-1/3",
+          playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
         )}>
-          <button 
-            onClick={togglePlayerMode}
-            className={cn(
-              "p-2 rounded-full transition-all duration-300",
-              playerMode === 'video' ? "bg-[#ff4e00] text-white shadow-lg shadow-[#ff4e00]/20" : "text-zinc-400 hover:text-white hover:bg-white/5"
-            )}
-            title={playerMode === 'video' ? "Switch to Audio Mode" : "Switch to Video Mode"}
-          >
-            {playerMode === 'video' ? <Music size={20} /> : <Video size={20} />}
-          </button>
-          <button 
-            onClick={() => setShowQueue(!showQueue)}
-            className={cn("transition-colors", showQueue ? "text-[#ff4e00]" : "text-zinc-400 hover:text-white")}
-          >
-            <ListMusic size={20} />
-          </button>
-          <div className="flex items-center gap-2 w-32">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={togglePlayerMode}
+              className={cn(
+                "p-2 rounded-full transition-all duration-300",
+                playerMode === 'video' ? "bg-[#ff4e00] text-white shadow-lg shadow-[#ff4e00]/20" : "text-zinc-400 hover:text-white hover:bg-white/5"
+              )}
+            >
+              {playerMode === 'video' ? <Music size={20} /> : <Video size={20} />}
+            </button>
+            <button 
+              onClick={() => setShowQueue(!showQueue)}
+              className={cn("transition-colors", showQueue ? "text-[#ff4e00]" : "text-zinc-400 hover:text-white")}
+            >
+              <ListMusic size={20} />
+            </button>
+          </div>
+          
+          <div className="hidden md:flex items-center gap-2 w-32">
             <Volume2 size={20} className="text-zinc-400" />
             <div className="relative flex-1 h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
               <div 
