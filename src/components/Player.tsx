@@ -192,15 +192,23 @@ export default function Player() {
     togglePlay();
   };
 
+  // Media Session Integration
   useEffect(() => {
     if (!currentSong || !('mediaSession' in navigator)) return;
 
     try {
-      console.log('Registering Media Session Metadata:', currentSong.title);
+      const { queue, currentIndex } = usePlayerStore.getState();
+      const nextSong = queue.length > 0 ? queue[(currentIndex + 1) % queue.length] : null;
+      // We append next song title to the artist field as a common trick to show it in notifications
+      const artistWithNext = nextSong && nextSong.id !== currentSong.id 
+        ? `${currentSong.artist} (Next: ${nextSong.title})`
+        : currentSong.artist;
+
+      console.log('Syncing Media Session Metadata:', currentSong.title);
       
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
-        artist: currentSong.artist,
+        artist: artistWithNext,
         album: currentSong.album || 'Harmony Stream',
         artwork: [
           { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/png' },
@@ -210,37 +218,42 @@ export default function Player() {
           { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/png' },
         ],
       });
-    } catch (error) {
-      console.warn('Media Session Metadata Error:', error);
-    }
-  }, [currentSong]);
 
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
+      // Register or re-register action handlers to ensure they are bound to the current context
+      const actions: [MediaSessionAction, () => void][] = [
+        ['play', () => usePlayerStore.getState().togglePlay()],
+        ['pause', () => usePlayerStore.getState().togglePlay()],
+        ['previoustrack', () => usePlayerStore.getState().previous()],
+        ['nexttrack', () => usePlayerStore.getState().next()],
+        ['stop', () => usePlayerStore.getState().togglePlay()],
+      ];
 
-    try {
-      // Use refs or stable wrappers for handlers
-      navigator.mediaSession.setActionHandler('play', () => {
-        usePlayerStore.getState().togglePlay();
+      actions.forEach(([action, handler]) => {
+        try {
+          navigator.mediaSession.setActionHandler(action, handler);
+        } catch (e) {}
       });
-      navigator.mediaSession.setActionHandler('pause', () => {
-        usePlayerStore.getState().togglePlay();
-      });
-      navigator.mediaSession.setActionHandler('previoustrack', () => {
-        usePlayerStore.getState().previous();
-      });
-      navigator.mediaSession.setActionHandler('nexttrack', () => {
-        usePlayerStore.getState().next();
-      });
+
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) {
           handleSeek(details.seekTime);
         }
       });
+
+      // Optional seek handlers
+      navigator.mediaSession.setActionHandler('seekbackward', () => {
+        const newPos = Math.max(0, usePlayerStore.getState().progress - 10);
+        handleSeek(newPos);
+      });
+      navigator.mediaSession.setActionHandler('seekforward', () => {
+        const newPos = Math.min(usePlayerStore.getState().duration, usePlayerStore.getState().progress + 10);
+        handleSeek(newPos);
+      });
+
     } catch (error) {
-      console.warn('Media Session Action Handler Error:', error);
+      console.warn('Media Session Update Error:', error);
     }
-  }, []);
+  }, [currentSong, queue]);
 
   useEffect(() => {
     if ('mediaSession' in navigator) {
@@ -254,7 +267,7 @@ export default function Player() {
         navigator.mediaSession.setPositionState({
           duration: duration,
           playbackRate: 1,
-          position: progress
+          position: Math.min(progress, duration)
         });
       } catch (e) {}
     }
