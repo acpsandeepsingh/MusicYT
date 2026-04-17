@@ -1,12 +1,14 @@
 import { Song } from '../types';
 
-export const getSongCoverUrl = (song: Song, size: 'mq' | 'maxres' = 'mq') => {
+export type YoutubeThumbnailSize = 'default' | 'mqdefault' | 'hqdefault' | 'sddefault' | 'maxresdefault';
+
+export const getSongCoverUrl = (song: Song, size: YoutubeThumbnailSize = 'mqdefault') => {
   if (song.coverUrl) return song.coverUrl;
   if (song.thumbnailUrl) return song.thumbnailUrl;
   
   if (song.youtubeId || song.videoId) {
     const id = song.youtubeId || song.videoId;
-    return `https://img.youtube.com/vi/${id}/${size}default.jpg`;
+    return `https://img.youtube.com/vi/${id}/${size}.jpg`;
   }
   
   // Fallback to a seeded placeholder if no cover or youtubeId

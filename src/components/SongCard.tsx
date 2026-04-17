@@ -6,6 +6,7 @@ import { motion } from 'motion/react';
 import { getSongCoverUrl } from '../lib/song-utils';
 import { db, auth } from '../lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { cn } from '../lib/utils';
 
 interface SongCardProps {
   song: Song;
@@ -39,8 +40,13 @@ const SongCard: React.FC<SongCardProps> = ({ song }) => {
 
   return (
     <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -4 }}
-      className="bg-white/5 p-4 rounded-xl hover:bg-white/10 transition-all duration-300 group cursor-pointer border border-white/5"
+      className={cn(
+        "bg-white/5 p-4 rounded-xl transition-all duration-300 group cursor-pointer border border-white/5",
+        isActive ? "bg-white/10 border-[#ff4e00]/30 shadow-lg shadow-[#ff4e00]/10" : "hover:bg-white/10"
+      )}
       onClick={() => setCurrentSong(song)}
     >
       <div className="relative aspect-square mb-4 overflow-hidden rounded-lg shadow-xl">
@@ -62,11 +68,12 @@ const SongCard: React.FC<SongCardProps> = ({ song }) => {
 
         <button 
           onClick={handleLike}
-          className={`absolute top-2 right-2 p-2 rounded-full backdrop-blur-md transition-all duration-300 ${
+          className={cn(
+            "absolute top-2 right-2 p-2 rounded-full backdrop-blur-md transition-all duration-300",
             isFavorite 
               ? "bg-[#ff4e00] text-white opacity-100" 
               : "bg-black/20 text-white opacity-0 group-hover:opacity-100 hover:bg-black/40"
-          }`}
+          )}
         >
           <Heart size={16} fill={isFavorite ? "currentColor" : "none"} />
         </button>

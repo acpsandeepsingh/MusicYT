@@ -49,7 +49,7 @@ export default function Player() {
     const handleMouseMove = () => {
       setIsUserInactive(false);
       if (inactivityTimeout.current) window.clearTimeout(inactivityTimeout.current);
-      inactivityTimeout.current = window.setInterval(() => {
+      inactivityTimeout.current = window.setTimeout(() => {
         if (playerMode === 'video') setIsUserInactive(true);
       }, 3000);
     };
@@ -859,7 +859,7 @@ export default function Player() {
             </div>
           </div>
         </div>
-
+      </div>
     </div>
   );
 }

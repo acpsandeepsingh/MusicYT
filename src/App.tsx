@@ -466,7 +466,7 @@ export default function App() {
             >
               <div className="relative h-80 rounded-3xl overflow-hidden group">
                 <img 
-                  src={getSongCoverUrl(featuredSong, 'maxres')} 
+                  src={getSongCoverUrl(featuredSong, 'maxresdefault')} 
                   alt={featuredSong.title}
                   className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-40"
                   referrerPolicy="no-referrer"
