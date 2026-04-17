@@ -24,6 +24,7 @@ export default function Player() {
     setPlayer,
     player,
     queue,
+    currentIndex,
     showToast,
     playerMode,
     setPlayerMode
@@ -208,45 +209,68 @@ export default function Player() {
   useEffect(() => {
     if (!currentSong || !('mediaSession' in navigator)) return;
 
-    try {
-      const { queue, currentIndex } = usePlayerStore.getState();
-      const nextSong = queue.length > 0 ? queue[(currentIndex + 1) % queue.length] : null;
-      
-      // Inject more queue info into artist field
-      let artistDisplay = currentSong.artist;
-      if (nextSong && nextSong.id !== currentSong.id) {
-        artistDisplay += ` • Next: ${nextSong.title}`;
-        if (queue.length > 2) artistDisplay += ` (+${queue.length - 2} in queue)`;
+    const syncMetadata = () => {
+      try {
+        const { queue, currentIndex } = usePlayerStore.getState();
+        
+        // Find current index accurately
+        const realIndex = queue.findIndex(s => s.id === currentSong.id);
+        const actualIndex = realIndex !== -1 ? realIndex : currentIndex;
+        
+        const nextIndex = (actualIndex + 1) % queue.length;
+        const nextSong = queue.length > 1 ? queue[nextIndex] : null;
+        
+        // Calculate remaining songs
+        const remainingAfterNext = queue.length > 2 ? queue.length - (actualIndex + 2) : 0;
+        
+        // VISIBILITY STRATEGY: 
+        // 1. Put Next Song info in the ARTIST field as requested.
+        // 2. Also put it in the ALBUM field for backup.
+        // 3. Use standard bullet points for clean OS rendering.
+        
+        let artistDisplay = currentSong.artist;
+        let albumDisplay = currentSong.album || 'Harmony Stream';
+
+        if (nextSong && nextSong.id !== currentSong.id) {
+          // Exactly as requested: "Artist • Next: Song Title (+X more)"
+          const moreSuffix = remainingAfterNext > 0 ? ` (+${remainingAfterNext} more)` : '';
+          artistDisplay = `${currentSong.artist} • Next: ${nextSong.title}${moreSuffix}`;
+          
+          // Album as secondary info source
+          albumDisplay = `⏭️ Next Up: ${nextSong.title}`;
+        }
+
+        console.log('MediaSession Force Sync:', { title: currentSong.title, artist: artistDisplay });
+
+        // Force browser to acknowledge change by clearing first
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: currentSong.title,
+          artist: artistDisplay,
+          album: albumDisplay,
+          artwork: [
+            { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/jpeg' },
+            { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/jpeg' },
+            { src: getSongCoverUrl(currentSong, 'hqdefault'), sizes: '192x192', type: 'image/jpeg' },
+            { src: getSongCoverUrl(currentSong, 'sddefault'), sizes: '256x256', type: 'image/jpeg' },
+            { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/jpeg' },
+          ],
+        });
+
+        // Set playback state explicitly to trigger UI refresh
+        navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+      } catch (error) {
+        console.warn('Media Session Metadata Error:', error);
       }
+    };
 
-      console.log('Syncing Media Session Metadata:', currentSong.title);
-      
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentSong.title,
-        artist: artistDisplay,
-        album: currentSong.album || 'Harmony Stream',
-        artwork: [
-          { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/png' },
-          { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/png' },
-          { src: getSongCoverUrl(currentSong, 'hqdefault'), sizes: '192x192', type: 'image/png' },
-          { src: getSongCoverUrl(currentSong, 'sddefault'), sizes: '256x256', type: 'image/png' },
-          { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/png' },
-        ],
-      });
-
-      // Register or re-register action handlers
-      const setupHandlers = () => {
+    // Register action handlers separately for stability
+    const setupHandlers = () => {
+      try {
         const actions: [MediaSessionAction, () => void][] = [
           ['play', () => usePlayerStore.getState().togglePlay()],
           ['pause', () => usePlayerStore.getState().togglePlay()],
-          ['previoustrack', () => {
-            console.log('MediaSession: previous track triggered');
-            usePlayerStore.getState().previous();
-          }],
-          ['nexttrack', () => {
-            console.log('MediaSession: next track triggered');
-            usePlayerStore.getState().next();
-          }],
+          ['nexttrack', () => usePlayerStore.getState().next()],
+          ['previoustrack', () => usePlayerStore.getState().previous()],
           ['stop', () => usePlayerStore.getState().togglePlay()],
         ];
 
@@ -256,32 +280,27 @@ export default function Player() {
           } catch (e) {}
         });
 
-        try {
-          navigator.mediaSession.setActionHandler('seekto', (details) => {
-            if (details.seekTime !== undefined) {
-              handleSeek(details.seekTime);
-            }
-          });
-          navigator.mediaSession.setActionHandler('seekbackward', () => handleSeek(Math.max(0, usePlayerStore.getState().progress - 10)));
-          navigator.mediaSession.setActionHandler('seekforward', () => handleSeek(Math.min(usePlayerStore.getState().duration, usePlayerStore.getState().progress + 10)));
-        } catch (e) {}
-      };
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details.seekTime !== undefined) handleSeek(details.seekTime);
+        });
+        navigator.mediaSession.setActionHandler('seekbackward', () => handleSeek(Math.max(0, usePlayerStore.getState().progress - 10)));
+        navigator.mediaSession.setActionHandler('seekforward', () => handleSeek(Math.min(usePlayerStore.getState().duration, usePlayerStore.getState().progress + 10)));
+      } catch (e) {}
+    };
 
-      setupHandlers();
-      // Reinforce handlers after short delay to ensure they "stick"
-      const t = setTimeout(setupHandlers, 600);
-      return () => clearTimeout(t);
+    // Initial sync
+    syncMetadata();
+    setupHandlers();
 
-    } catch (error) {
-      console.warn('Media Session Update Error:', error);
-    }
-  }, [currentSong, queue, handleSeek]);
+    // Secondary sync after track starts playing to overwrite any browser defaults
+    const t1 = setTimeout(syncMetadata, 1000);
+    const t2 = setTimeout(setupHandlers, 1500);
 
-  useEffect(() => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    }
-  }, [isPlaying]);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [currentSong, queue, currentIndex, isPlaying, handleSeek]);
 
   useEffect(() => {
     if ('mediaSession' in navigator && duration > 0) {
@@ -293,7 +312,10 @@ export default function Player() {
         });
       } catch (e) {}
     }
-  }, [duration, progress]);
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [duration, progress, isPlaying]);
 
   useEffect(() => {
     if (!currentSong) return;
