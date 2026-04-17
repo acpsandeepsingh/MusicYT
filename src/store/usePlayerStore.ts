@@ -16,10 +16,12 @@ interface PlayerState {
   selectedPlaylistId: string | null;
   sidebarCollapsed: boolean;
   playerMode: 'audio' | 'video';
+  playerType: 'youtube' | 'audio';
   toast: { message: string; type: 'success' | 'error' | 'info' } | null;
   
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   hideToast: () => void;
+  setPlayerType: (type: 'youtube' | 'audio') => void;
 
   setCurrentSong: (song: Song) => void;
   setQueue: (songs: Song[]) => void;
@@ -53,6 +55,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   selectedPlaylistId: null,
   sidebarCollapsed: false,
   playerMode: 'audio',
+  playerType: 'youtube',
   toast: null,
 
   showToast: (message: string, type = 'info') => {
@@ -141,5 +144,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setPlayerMode: (mode: 'audio' | 'video') => {
     set({ playerMode: mode });
+  },
+  
+  setPlayerType: (type: 'youtube' | 'audio') => {
+    set({ playerType: type });
   },
 }));
