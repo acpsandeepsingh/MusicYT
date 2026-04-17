@@ -56,7 +56,7 @@ const SongCard: React.FC<SongCardProps> = ({ song }) => {
           </div>
         </div>
         
-        <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-mono text-white opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-md rounded text-[10px] font-mono text-white opacity-90">
           {formatDuration(song.duration)}
         </div>
 

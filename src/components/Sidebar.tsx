@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Home, Search, Library, PlusCircle, Heart, Music2, ListMusic, ChevronLeft, ChevronRight, Menu } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 import CreatePlaylistModal from './CreatePlaylistModal';
 import { db, auth } from '../lib/firebase';
 import { collection, query, onSnapshot } from 'firebase/firestore';
@@ -10,10 +8,7 @@ import { Playlist } from '../types';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { motion, AnimatePresence } from 'motion/react';
 import { handleFirestoreError, OperationType } from '../lib/firestore-errors';
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { cn } from '../lib/utils';
 
 const SidebarItem = ({ icon: Icon, label, active = false, onClick, collapsed = false }: { icon: any, label: string, active?: boolean, onClick?: () => void, collapsed?: boolean, key?: any }) => (
   <div 

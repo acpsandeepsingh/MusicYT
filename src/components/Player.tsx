@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, ListMusic, Video, Music } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, ListMusic, Video, Music, Maximize2, Volume1, VolumeX } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { motion, AnimatePresence } from 'motion/react';
 import YouTube, { YouTubeProps } from 'react-youtube';
 import { getSongCoverUrl } from '../lib/song-utils';
 import { Capacitor } from '@capacitor/core';
 import YouTubeExtractor from '../lib/native-bridge';
+import { cn } from '../lib/utils';
 
 export default function Player() {
   const { 
@@ -33,6 +34,7 @@ export default function Player() {
   const [hasInteracted, setHasInteracted] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isUserInactive, setIsUserInactive] = useState(false);
+  const [videoZoom, setVideoZoom] = useState<number>(1);
   const canUnmute = useRef<boolean>(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressInterval = useRef<number | null>(null);
@@ -194,7 +196,7 @@ export default function Player() {
     if (!currentSong || !('mediaSession' in navigator)) return;
 
     try {
-      console.log('Registering Media Session Actions for:', currentSong.title);
+      console.log('Registering Media Session Metadata:', currentSong.title);
       
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
@@ -208,48 +210,55 @@ export default function Player() {
           { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/png' },
         ],
       });
+    } catch (error) {
+      console.warn('Media Session Metadata Error:', error);
+    }
+  }, [currentSong]);
 
-      // Update position state
-      if (duration > 0) {
-        navigator.mediaSession.setPositionState({
-          duration: duration,
-          playbackRate: 1,
-          position: progress
-        });
-      }
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
 
+    try {
+      // Use refs or stable wrappers for handlers
       navigator.mediaSession.setActionHandler('play', () => {
-        if (!isPlaying) handleTogglePlay();
+        usePlayerStore.getState().togglePlay();
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        if (isPlaying) handleTogglePlay();
+        usePlayerStore.getState().togglePlay();
       });
-      
-      // Crucial: Use refs or stable functions to avoid stale closures in event handlers
       navigator.mediaSession.setActionHandler('previoustrack', () => {
-        console.log('MediaSession: NextTrack');
-        previous();
+        usePlayerStore.getState().previous();
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => {
-        console.log('MediaSession: NextTrack');
-        next();
+        usePlayerStore.getState().next();
       });
-      
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) {
           handleSeek(details.seekTime);
         }
       });
     } catch (error) {
-      console.warn('Media Session Error:', error);
+      console.warn('Media Session Action Handler Error:', error);
     }
-  }, [currentSong, duration, next, previous]); // Remove isPlaying to prevent constant re-registration
+  }, []);
 
   useEffect(() => {
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
     }
   }, [isPlaying]);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator && duration > 0) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: duration,
+          playbackRate: 1,
+          position: progress
+        });
+      } catch (e) {}
+    }
+  }, [duration, progress]);
 
   useEffect(() => {
     if (!currentSong) return;
@@ -570,8 +579,8 @@ export default function Player() {
       ref={playerContainerRef}
       onContextMenu={handleContextMenu}
       className={cn(
-        "fixed left-0 right-0 z-50 transition-all duration-500",
-        playerMode === 'video' ? "fullscreen-target inset-0 h-screen bg-black" : "bottom-16 md:bottom-0 h-24 bg-black/80 backdrop-blur-2xl border-t border-white/5",
+        "fixed left-0 right-0 z-[70] transition-all duration-500",
+        playerMode === 'video' ? "fullscreen-target inset-0 h-screen bg-black" : "bottom-[64px] pb-[env(safe-area-inset-bottom)] md:bottom-0 h-32 md:h-24 bg-black/90 backdrop-blur-2xl border-t border-white/5 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]",
         isUserInactive && playerMode === 'video' && "user-inactive"
       )}
     >
@@ -613,8 +622,8 @@ export default function Player() {
       </AnimatePresence>
 
       <div className={cn(
-        "flex flex-col md:flex-row items-center justify-between px-4 md:px-6 transition-all duration-500 gap-4 md:gap-0 py-4 md:py-0",
-        playerMode === 'video' ? "absolute bottom-0 left-0 right-0 h-auto md:h-24 bg-gradient-to-t from-black/95 via-black/80 to-transparent z-20" : "h-full"
+        "flex flex-col md:flex-row items-center justify-between px-4 md:px-6 h-full transition-all duration-500 gap-2 md:gap-0",
+        playerMode === 'video' ? "absolute bottom-0 left-0 right-0 h-auto md:h-24 bg-gradient-to-t from-black/95 via-black/80 to-transparent z-20" : ""
       )}>
         {/* Player Container - Hidden in audio mode, fullscreen in video mode */}
         <div className={cn(
@@ -623,7 +632,27 @@ export default function Player() {
             ? "fixed inset-0 w-screen h-screen z-10 bg-black pointer-events-auto" 
             : "fixed -top-[2000px] -left-[2000px] w-[1px] h-[1px] opacity-0"
         )}>
-          <div className={playerType === 'youtube' ? 'w-full h-full' : 'hidden'}>
+          {playerMode === 'video' && (
+            <div className="absolute top-6 right-6 z-50 flex items-center gap-2">
+              <button 
+                onClick={() => setVideoZoom(1)}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-bold transition-all backdrop-blur-md", videoZoom === 1 ? "bg-[#ff4e00] text-white" : "bg-black/60 text-white/60 hover:text-white")}
+              >100%</button>
+              <button 
+                onClick={() => setVideoZoom(1.25)}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-bold transition-all backdrop-blur-md", videoZoom === 1.25 ? "bg-[#ff4e00] text-white" : "bg-black/60 text-white/60 hover:text-white")}
+              >125%</button>
+              <button 
+                onClick={() => setVideoZoom(1.5)}
+                className={cn("px-3 py-1.5 rounded-full text-xs font-bold transition-all backdrop-blur-md", videoZoom === 1.5 ? "bg-[#ff4e00] text-white" : "bg-black/60 text-white/60 hover:text-white")}
+              >150%</button>
+            </div>
+          )}
+          <div className={cn(
+            "h-full w-full flex items-center justify-center transition-transform duration-500",
+            playerType === 'youtube' ? 'block' : 'hidden'
+          )}
+          style={{ transform: `scale(${videoZoom})` }}>
             <YouTube 
               videoId={currentSong.videoId || currentSong.youtubeId} 
               opts={{
@@ -656,112 +685,181 @@ export default function Player() {
           />
         </div>
 
-        {/* Song Info */}
+        {/* Mobile Layout Override for Audio Mode */}
+        {playerMode === 'audio' && (
+          <div className="md:hidden w-full flex flex-col gap-2 py-2">
+            {/* Seek Bar First */}
+            <div className="flex items-center gap-3 w-full">
+              <span className="text-[9px] text-zinc-500 font-mono w-8 text-right">{formatTime(progress)}</span>
+              <div className="relative flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                <div 
+                  className="absolute top-0 left-0 h-full bg-[#ff4e00]" 
+                  style={{ width: `${(progress / (duration || 1)) * 100}%` }}
+                />
+                <input 
+                  type="range"
+                  min="0"
+                  max={duration || 100}
+                  value={progress}
+                  step="0.1"
+                  onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <span className="text-[9px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <img 
+                  src={getSongCoverUrl(currentSong)} 
+                  alt={currentSong.title}
+                  className="w-10 h-10 rounded shadow-lg object-cover flex-shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="overflow-hidden">
+                  <h4 className="font-semibold text-[11px] truncate">{currentSong.title}</h4>
+                  <p className="text-[9px] text-zinc-400 truncate">{currentSong.artist}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 px-2">
+                <button onClick={previous} className="text-zinc-400 active:text-white"><SkipBack size={20} fill="currentColor" /></button>
+                <button 
+                  onClick={handleTogglePlay}
+                  className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-black active:scale-90 transition-transform"
+                >
+                  {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-0.5" />}
+                </button>
+                <button onClick={next} className="text-zinc-400 active:text-white"><SkipForward size={20} fill="currentColor" /></button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={togglePlayerMode}
+                  className="p-2 text-zinc-400"
+                >
+                  <Video size={18} />
+                </button>
+                <button 
+                  onClick={() => setShowQueue(!showQueue)}
+                  className={cn("p-2 transition-colors", showQueue ? "text-[#ff4e00]" : "text-zinc-400")}
+                >
+                  <ListMusic size={18} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Desktop Layout or Video Mode Bottom Bar */}
         <div className={cn(
-          "flex items-center gap-4 transition-all duration-500 w-full md:w-1/3",
-          playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
+          "hidden md:flex flex-row items-center justify-between w-full h-full",
+          playerMode === 'video' && "flex"
         )}>
-          <motion.img 
-            key={currentSong.id}
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            src={getSongCoverUrl(currentSong)} 
-            alt={currentSong.title}
-            className="w-12 h-12 md:w-14 md:h-14 rounded-lg shadow-lg object-cover flex-shrink-0"
-            referrerPolicy="no-referrer"
-          />
-          <div className="overflow-hidden flex-1">
-            <h4 className="font-semibold text-xs md:text-sm hover:underline cursor-pointer truncate">{currentSong.title}</h4>
-            <p className="text-[10px] md:text-xs text-zinc-400 hover:underline cursor-pointer truncate">{currentSong.artist}</p>
+          {/* Song Info */}
+          <div className={cn(
+            "flex items-center gap-4 transition-all duration-500 w-full md:w-1/3",
+            playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
+          )}>
+            <motion.img 
+              key={currentSong.id}
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              src={getSongCoverUrl(currentSong)} 
+              alt={currentSong.title}
+              className="w-12 h-12 md:w-14 md:h-14 rounded-lg shadow-lg object-cover flex-shrink-0"
+              referrerPolicy="no-referrer"
+            />
+            <div className="overflow-hidden flex-1">
+              <h4 className="font-semibold text-xs md:text-sm hover:underline cursor-pointer truncate">{currentSong.title}</h4>
+              <p className="text-[10px] md:text-xs text-zinc-400 hover:underline cursor-pointer truncate">{currentSong.artist}</p>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className={cn(
+            "flex flex-col items-center gap-2 transition-all duration-500 w-full md:w-1/3",
+            playerMode === 'video' ? "md:w-2/4" : "md:w-1/3"
+          )}>
+            <div className="flex items-center gap-6 md:gap-8">
+              <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Shuffle size={18} /></button>
+              <button onClick={previous} className="text-zinc-400 hover:text-white transition-colors"><SkipBack size={24} fill="currentColor" /></button>
+              <button 
+                onClick={handleTogglePlay}
+                className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition-transform active:scale-95 shadow-xl"
+              >
+                {isPlaying ? <Pause size={24} md:size={28} fill="currentColor" /> : <Play size={24} md:size={28} fill="currentColor" className="ml-1" />}
+              </button>
+              <button onClick={next} className="text-zinc-400 hover:text-white transition-colors"><SkipForward size={24} fill="currentColor" /></button>
+              <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Repeat size={18} /></button>
+            </div>
+            
+            <div className="flex items-center gap-3 w-full max-w-md">
+              <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8 text-right">{formatTime(progress)}</span>
+              <div className="relative flex-1 h-1.5 md:h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
+                <div 
+                  className="absolute top-0 left-0 h-full bg-[#ff4e00] group-hover:bg-[#ff6a2a]" 
+                  style={{ width: `${(progress / (duration || 1)) * 100}%` }}
+                />
+                <input 
+                  type="range"
+                  min="0"
+                  max={duration || 100}
+                  value={progress}
+                  step="0.1"
+                  onChange={(e) => handleSeek(parseFloat(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
+            </div>
+          </div>
+
+          {/* Volume & Extra */}
+          <div className={cn(
+            "flex items-center justify-center md:justify-end gap-6 md:gap-4 transition-all duration-500 w-full md:w-1/3",
+            playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
+          )}>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={togglePlayerMode}
+                className={cn(
+                  "p-2 rounded-full transition-all duration-300",
+                  playerMode === 'video' ? "bg-[#ff4e00] text-white shadow-lg shadow-[#ff4e00]/20" : "text-zinc-400 hover:text-white hover:bg-white/5"
+                )}
+              >
+                {playerMode === 'video' ? <Music size={20} /> : <Video size={20} />}
+              </button>
+              <button 
+                onClick={() => setShowQueue(!showQueue)}
+                className={cn("transition-colors", showQueue ? "text-[#ff4e00]" : "text-zinc-400 hover:text-white")}
+              >
+                <ListMusic size={20} />
+              </button>
+            </div>
+            
+            <div className="hidden md:flex items-center gap-2 w-32">
+              <Volume2 size={20} className="text-zinc-400" />
+              <div className="relative flex-1 h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
+                <div 
+                  className="absolute top-0 left-0 h-full bg-white group-hover:bg-[#ff4e00]" 
+                  style={{ width: `${volume * 100}%` }}
+                />
+                <input 
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Controls */}
-        <div className={cn(
-          "flex flex-col items-center gap-2 transition-all duration-500 w-full md:w-1/3",
-          playerMode === 'video' ? "md:w-2/4" : "md:w-1/3"
-        )}>
-          <div className="flex items-center gap-6 md:gap-8">
-            <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Shuffle size={18} /></button>
-            <button onClick={previous} className="text-zinc-400 hover:text-white transition-colors"><SkipBack size={24} fill="currentColor" /></button>
-            <button 
-              onClick={handleTogglePlay}
-              className="w-10 h-10 md:w-12 md:h-12 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 transition-transform active:scale-95"
-            >
-              {isPlaying ? <Pause size={24} md:size={28} fill="currentColor" /> : <Play size={24} md:size={28} fill="currentColor" className="ml-1" />}
-            </button>
-            <button onClick={next} className="text-zinc-400 hover:text-white transition-colors"><SkipForward size={24} fill="currentColor" /></button>
-            <button className="hidden md:block text-zinc-400 hover:text-white transition-colors"><Repeat size={18} /></button>
-          </div>
-          
-          <div className="flex items-center gap-3 w-full max-w-md">
-            <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8 text-right">{formatTime(progress)}</span>
-            <div className="relative flex-1 h-1.5 md:h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
-              <div 
-                className="absolute top-0 left-0 h-full bg-[#ff4e00] group-hover:bg-[#ff6a2a]" 
-                style={{ width: `${(progress / (duration || 1)) * 100}%` }}
-              />
-              <input 
-                type="range"
-                min="0"
-                max={duration || 100}
-                value={progress}
-                step="0.1"
-                onChange={(e) => handleSeek(parseFloat(e.target.value))}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
-            </div>
-            <span className="text-[9px] md:text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
-          </div>
-        </div>
-
-        {/* Volume & Extra */}
-        <div className={cn(
-          "flex items-center justify-center md:justify-end gap-6 md:gap-4 transition-all duration-500 w-full md:w-1/3",
-          playerMode === 'video' ? "md:w-1/4" : "md:w-1/3"
-        )}>
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={togglePlayerMode}
-              className={cn(
-                "p-2 rounded-full transition-all duration-300",
-                playerMode === 'video' ? "bg-[#ff4e00] text-white shadow-lg shadow-[#ff4e00]/20" : "text-zinc-400 hover:text-white hover:bg-white/5"
-              )}
-            >
-              {playerMode === 'video' ? <Music size={20} /> : <Video size={20} />}
-            </button>
-            <button 
-              onClick={() => setShowQueue(!showQueue)}
-              className={cn("transition-colors", showQueue ? "text-[#ff4e00]" : "text-zinc-400 hover:text-white")}
-            >
-              <ListMusic size={20} />
-            </button>
-          </div>
-          
-          <div className="hidden md:flex items-center gap-2 w-32">
-            <Volume2 size={20} className="text-zinc-400" />
-            <div className="relative flex-1 h-1 bg-white/10 rounded-full group cursor-pointer overflow-hidden">
-              <div 
-                className="absolute top-0 left-0 h-full bg-white group-hover:bg-[#ff4e00]" 
-                style={{ width: `${volume * 100}%` }}
-              />
-              <input 
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
-}
-
-function cn(...inputs: any[]) {
-  return inputs.filter(Boolean).join(' ');
 }

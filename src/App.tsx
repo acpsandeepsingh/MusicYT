@@ -291,9 +291,22 @@ export default function App() {
       return (
         <section className="px-8 pt-8">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-3xl font-black tracking-tighter">
-              {searchQuery.trim() ? `Search Results for "${searchQuery}"` : 'Search'}
-            </h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-3xl font-black tracking-tighter">
+                {searchQuery.trim() ? `Search Results for "${searchQuery}"` : 'Search'}
+              </h2>
+              {searchResults.length > 0 && (
+                <button 
+                  onClick={() => {
+                    setQueue(searchResults);
+                    setCurrentSong(searchResults[0]);
+                  }}
+                  className="w-10 h-10 bg-[#ff4e00] rounded-full flex items-center justify-center text-white shadow-lg hover:scale-110 active:scale-95 transition-transform"
+                >
+                  <Play size={20} fill="white" />
+                </button>
+              )}
+            </div>
             {searchQuery.trim() && (
               <button 
                 onClick={() => usePlayerStore.getState().setSearchQuery('')}
@@ -337,16 +350,40 @@ export default function App() {
     if (activeView === 'playlist') {
       return (
         <section className="px-8 pt-8">
-          <div className="flex items-end gap-8 mb-8">
+          <div className="flex items-end gap-8 mb-8 flex-wrap">
             <div className={cn(
-              "w-52 h-52 rounded-2xl shadow-2xl flex items-center justify-center",
+              "w-52 h-52 rounded-2xl shadow-2xl flex items-center justify-center relative group",
               isLiked ? "bg-gradient-to-br from-indigo-700 to-purple-900" : "bg-[#ff4e00]/20"
             )}>
               {isLiked ? <Heart size={80} fill="white" /> : <ListMusic size={80} className="text-[#ff4e00]" />}
+              {playlistSongs.length > 0 && (
+                <button 
+                  onClick={() => {
+                    setQueue(playlistSongs);
+                    setCurrentSong(playlistSongs[0]);
+                  }}
+                  className="absolute bottom-4 right-4 w-12 h-12 bg-[#ff4e00] rounded-full flex items-center justify-center text-white shadow-xl opacity-0 group-hover:opacity-100 transition-opacity translate-y-2 group-hover:translate-y-0"
+                >
+                  <Play size={24} fill="white" className="ml-1" />
+                </button>
+              )}
             </div>
             <div className="mb-2">
               <span className="text-xs font-bold uppercase tracking-widest">Playlist</span>
-              <h2 className="text-7xl font-black tracking-tighter mt-2 mb-4">{currentPlaylist?.name || 'Playlist'}</h2>
+              <div className="flex items-center gap-4">
+                <h2 className="text-5xl md:text-7xl font-black tracking-tighter mt-2 mb-4">{currentPlaylist?.name || 'Playlist'}</h2>
+                {playlistSongs.length > 0 && (
+                  <button 
+                    onClick={() => {
+                      setQueue(playlistSongs);
+                      setCurrentSong(playlistSongs[0]);
+                    }}
+                    className="w-12 h-12 bg-[#ff4e00] rounded-full flex items-center justify-center text-white shadow-lg hover:scale-110 active:scale-95 transition-transform md:hidden"
+                  >
+                    <Play size={24} fill="white" className="ml-1" />
+                  </button>
+                )}
+              </div>
               <p className="text-zinc-400 font-medium">{playlistSongs.length} songs</p>
             </div>
           </div>
@@ -493,7 +530,20 @@ export default function App() {
           return (
             <section key={genre.id} className="px-8 py-8">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold tracking-tight">{genre.label}</h2>
+                <div className="flex items-center gap-4">
+                  <h2 className="text-2xl font-bold tracking-tight">{genre.label}</h2>
+                  {songs.length > 0 && (
+                    <button 
+                      onClick={() => {
+                        setQueue(songs);
+                        setCurrentSong(songs[0]);
+                      }}
+                      className="w-8 h-8 bg-[#ff4e00] rounded-full flex items-center justify-center text-white shadow-lg hover:scale-110 active:scale-95 transition-transform"
+                    >
+                      <Play size={16} fill="white" className="ml-0.5" />
+                    </button>
+                  )}
+                </div>
                 {!selectedGenre && (
                   <button 
                     onClick={() => setSelectedGenre(genre.id)}
