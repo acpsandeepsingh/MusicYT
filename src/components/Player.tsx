@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Repeat, Shuffle, ListMusic, Video, Music, Maximize2, Volume1, VolumeX } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { motion, AnimatePresence } from 'motion/react';
@@ -43,6 +43,18 @@ export default function Player() {
   const lastUnmuteAttempt = useRef<number>(0);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const inactivityTimeout = useRef<number | null>(null);
+
+  const handleSeek = useCallback((pos: number) => {
+    if (playerType === 'youtube' && player) {
+      try {
+        player.seekTo(pos, true);
+        if (isPlaying) player.playVideo();
+      } catch (e) {}
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = pos;
+    }
+    updateProgress(pos);
+  }, [playerType, player, isPlaying, updateProgress]);
 
   // Handle inactivity for hiding cursor/UI in video mode
   useEffect(() => {
@@ -199,16 +211,19 @@ export default function Player() {
     try {
       const { queue, currentIndex } = usePlayerStore.getState();
       const nextSong = queue.length > 0 ? queue[(currentIndex + 1) % queue.length] : null;
-      // We append next song title to the artist field as a common trick to show it in notifications
-      const artistWithNext = nextSong && nextSong.id !== currentSong.id 
-        ? `${currentSong.artist} (Next: ${nextSong.title})`
-        : currentSong.artist;
+      
+      // Inject more queue info into artist field
+      let artistDisplay = currentSong.artist;
+      if (nextSong && nextSong.id !== currentSong.id) {
+        artistDisplay += ` • Next: ${nextSong.title}`;
+        if (queue.length > 2) artistDisplay += ` (+${queue.length - 2} in queue)`;
+      }
 
       console.log('Syncing Media Session Metadata:', currentSong.title);
       
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
-        artist: artistWithNext,
+        artist: artistDisplay,
         album: currentSong.album || 'Harmony Stream',
         artwork: [
           { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/png' },
@@ -219,41 +234,48 @@ export default function Player() {
         ],
       });
 
-      // Register or re-register action handlers to ensure they are bound to the current context
-      const actions: [MediaSessionAction, () => void][] = [
-        ['play', () => usePlayerStore.getState().togglePlay()],
-        ['pause', () => usePlayerStore.getState().togglePlay()],
-        ['previoustrack', () => usePlayerStore.getState().previous()],
-        ['nexttrack', () => usePlayerStore.getState().next()],
-        ['stop', () => usePlayerStore.getState().togglePlay()],
-      ];
+      // Register or re-register action handlers
+      const setupHandlers = () => {
+        const actions: [MediaSessionAction, () => void][] = [
+          ['play', () => usePlayerStore.getState().togglePlay()],
+          ['pause', () => usePlayerStore.getState().togglePlay()],
+          ['previoustrack', () => {
+            console.log('MediaSession: previous track triggered');
+            usePlayerStore.getState().previous();
+          }],
+          ['nexttrack', () => {
+            console.log('MediaSession: next track triggered');
+            usePlayerStore.getState().next();
+          }],
+          ['stop', () => usePlayerStore.getState().togglePlay()],
+        ];
 
-      actions.forEach(([action, handler]) => {
+        actions.forEach(([action, handler]) => {
+          try {
+            navigator.mediaSession.setActionHandler(action, handler);
+          } catch (e) {}
+        });
+
         try {
-          navigator.mediaSession.setActionHandler(action, handler);
+          navigator.mediaSession.setActionHandler('seekto', (details) => {
+            if (details.seekTime !== undefined) {
+              handleSeek(details.seekTime);
+            }
+          });
+          navigator.mediaSession.setActionHandler('seekbackward', () => handleSeek(Math.max(0, usePlayerStore.getState().progress - 10)));
+          navigator.mediaSession.setActionHandler('seekforward', () => handleSeek(Math.min(usePlayerStore.getState().duration, usePlayerStore.getState().progress + 10)));
         } catch (e) {}
-      });
+      };
 
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) {
-          handleSeek(details.seekTime);
-        }
-      });
-
-      // Optional seek handlers
-      navigator.mediaSession.setActionHandler('seekbackward', () => {
-        const newPos = Math.max(0, usePlayerStore.getState().progress - 10);
-        handleSeek(newPos);
-      });
-      navigator.mediaSession.setActionHandler('seekforward', () => {
-        const newPos = Math.min(usePlayerStore.getState().duration, usePlayerStore.getState().progress + 10);
-        handleSeek(newPos);
-      });
+      setupHandlers();
+      // Reinforce handlers after short delay to ensure they "stick"
+      const t = setTimeout(setupHandlers, 600);
+      return () => clearTimeout(t);
 
     } catch (error) {
       console.warn('Media Session Update Error:', error);
     }
-  }, [currentSong, queue]);
+  }, [currentSong, queue, handleSeek]);
 
   useEffect(() => {
     if ('mediaSession' in navigator) {
@@ -412,9 +434,17 @@ export default function Player() {
   };
 
   const onPlayerReady: YouTubeProps['onReady'] = (event) => {
-    console.log('YouTube Player Ready');
+    console.log('YouTube Player Ready, restoring progress if any:', progress);
     setPlayer(event.target);
     event.target.setVolume(volume * 100);
+    
+    // Restore progress if switching modes for the same song
+    if (progress > 0) {
+      try {
+        event.target.seekTo(progress, true);
+      } catch (e) {}
+    }
+
     if (isPlaying && playerType === 'youtube') {
       setTimeout(() => {
         try {
@@ -499,10 +529,13 @@ export default function Player() {
   };
 
   const handleAudioMetadata = () => {
-    console.log('Audio Metadata Loaded');
+    console.log('Audio Metadata Loaded, progress:', progress);
     if (loadTimeout.current) window.clearTimeout(loadTimeout.current);
     if (audioRef.current) {
       setDuration(audioRef.current.duration);
+      if (progress > 0) {
+        audioRef.current.currentTime = progress;
+      }
     }
   };
 
@@ -539,24 +572,12 @@ export default function Player() {
     }
   };
 
-  const handleSeek = (pos: number) => {
-    if (playerType === 'youtube' && player) {
-      try {
-        player.seekTo(pos, true);
-        if (isPlaying) player.playVideo();
-      } catch (e) {}
-    } else if (audioRef.current) {
-      audioRef.current.currentTime = pos;
-    }
-    updateProgress(pos);
-  };
-
-  const opts: YouTubeProps['opts'] = {
-    height: '200',
-    width: '200',
+  const ytOpts: YouTubeProps['opts'] = useMemo(() => ({
+    height: '100%',
+    width: '100%',
     playerVars: {
       autoplay: 1,
-      controls: 0,
+      controls: playerMode === 'video' ? 1 : 0,
       disablekb: 1,
       fs: 0,
       modestbranding: 1,
@@ -565,9 +586,10 @@ export default function Player() {
       enablejsapi: 1,
       widget_referrer: window.location.href,
       mute: 1,
-      playsinline: 1
+      playsinline: 1,
+      origin: window.location.origin,
     },
-  };
+  }), [playerMode]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -668,18 +690,7 @@ export default function Player() {
           style={{ transform: `scale(${videoZoom})` }}>
             <YouTube 
               videoId={currentSong.videoId || currentSong.youtubeId} 
-              opts={{
-                ...opts,
-                height: '100%',
-                width: '100%',
-                playerVars: {
-                  ...opts.playerVars,
-                  controls: playerMode === 'video' ? 1 : 0,
-                  origin: window.location.origin,
-                  enablejsapi: 1,
-                  playsinline: 1, // Required for background survival on mobile browsers
-                }
-              }} 
+              opts={ytOpts} 
               onReady={onPlayerReady} 
               onStateChange={onPlayerStateChange} 
               onError={onPlayerError}
