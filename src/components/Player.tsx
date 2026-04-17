@@ -289,13 +289,24 @@ export default function Player() {
     };
 
     const handleNextAction = () => {
-      console.log('MediaSession: Next Clicked');
-      usePlayerStore.getState().next();
+      console.log('MediaSession: Next Clicked (Direct API Path)');
+      const state = usePlayerStore.getState();
+      if (state.playerType === 'youtube' && state.player) {
+        // Use YouTube's native skip to satisfy the OS "Next" signal
+        state.player.nextVideo();
+      } else {
+        state.next();
+      }
     };
 
     const handlePrevAction = () => {
-      console.log('MediaSession: Previous Clicked');
-      usePlayerStore.getState().previous();
+      console.log('MediaSession: Previous Clicked (Direct API Path)');
+      const state = usePlayerStore.getState();
+      if (state.playerType === 'youtube' && state.player) {
+        state.player.previousVideo();
+      } else {
+        state.previous();
+      }
     };
 
     const actions: [MediaSessionAction, () => void][] = [
@@ -507,29 +518,29 @@ export default function Player() {
     const activeId = currentSong.videoId || currentSong.youtubeId;
     if (!activeId) return;
 
-    // Check if we need to manually trigger a load/change
+    // The Critical Fix: If YouTube has already transitioned internally,
+    // we MUST NOT call loadPlaylist/loadVideoById as it resets the Media Session.
     if (activeId !== lastKnownVideoId.current) {
       if (isInternalSkip.current) {
-        // Already handled internally by YouTube, just sync the ID
-        console.log('API: Syncing internal skip to', activeId);
+        console.log('API SYNC: Song changed internally, already correct in player.');
         lastKnownVideoId.current = activeId;
         isInternalSkip.current = false;
-      } else {
-        // Manual skip from UI, force YouTube to load the new playlist context
-        console.log('API: Manual skip detected, loading playlist for', activeId);
-        lastKnownVideoId.current = activeId;
-        
-        const nextIds = queue
-          .slice(currentIndex)
-          .map(s => s.videoId || s.youtubeId)
-          .filter(id => id && id !== '')
-          .slice(0, 40);
+        return;
+      }
 
-        if (nextIds.length > 1) {
-          player.loadPlaylist(nextIds, 0);
-        } else {
-          player.loadVideoById(activeId);
-        }
+      console.log('API FORCE: Manual track change, updating player state.');
+      lastKnownVideoId.current = activeId;
+      
+      const nextIds = queue
+        .slice(currentIndex)
+        .map(s => s.videoId || s.youtubeId)
+        .filter(id => id && id !== '')
+        .slice(0, 40);
+
+      if (nextIds.length > 1) {
+        player.loadPlaylist(nextIds, 0);
+      } else {
+        player.loadVideoById(activeId);
       }
     }
   }, [currentSong, player, playerType, queue, currentIndex]);
@@ -585,27 +596,23 @@ export default function Player() {
   const onPlayerStateChange: YouTubeProps['onStateChange'] = (event) => {
     console.log('YouTube State Change:', event.data);
     
-    // Status tracking for sync
-    if (event.data === 1 || event.data === 2) {
+    // Enhanced check on every state change to keep OS and App perfectly aligned
+    if (event.data === 1 || event.data === 2 || event.data === 3) {
       try {
         const url = event.target.getVideoUrl();
         const videoId = currentSong?.videoId || currentSong?.youtubeId;
         
         if (url && videoId) {
-          // If the URL contains a DIFFERENT video ID than our store, it means YouTube skipped internally
-          // Check if the current actual URL has our activeId
           if (!url.includes(videoId)) {
-            console.log('YouTube Internal Transition Detected! Syncing HarmonyStore...');
+            // This is the OS/Playlist skip detection
+            console.log('SYNC: Detected track switch via native controls.');
             isInternalSkip.current = true;
             usePlayerStore.getState().next();
           } else {
-            // Updated our tracking
             lastKnownVideoId.current = videoId;
           }
         }
-      } catch (e) {
-        console.warn('Sync check failed:', e);
-      }
+      } catch (e) {}
     }
 
     if (event.data === -1 && isPlaying) {
