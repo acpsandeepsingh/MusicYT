@@ -46,6 +46,8 @@ export default function Player() {
   const stuckCheckInterval = useRef<number | null>(null);
   const lastUnmuteAttempt = useRef<number>(0);
   const playerContainerRef = useRef<HTMLDivElement>(null);
+  const lastKnownVideoId = useRef<string | null>(null);
+  const isInternalSkip = useRef<boolean>(false);
   const inactivityTimeout = useRef<number | null>(null);
   const metadataSyncTimer = useRef<number | null>(null);
   const silentAnchorRef = useRef<HTMLAudioElement | null>(null);
@@ -469,6 +471,39 @@ export default function Player() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  useEffect(() => {
+    if (!player || playerType !== 'youtube' || !currentSong) return;
+    
+    const activeId = currentSong.videoId || currentSong.youtubeId;
+    if (!activeId) return;
+
+    // Check if we need to manually trigger a load/change
+    if (activeId !== lastKnownVideoId.current) {
+      if (isInternalSkip.current) {
+        // Already handled internally by YouTube, just sync the ID
+        console.log('API: Syncing internal skip to', activeId);
+        lastKnownVideoId.current = activeId;
+        isInternalSkip.current = false;
+      } else {
+        // Manual skip from UI, force YouTube to load the new playlist context
+        console.log('API: Manual skip detected, loading playlist for', activeId);
+        lastKnownVideoId.current = activeId;
+        
+        const nextIds = queue
+          .slice(currentIndex)
+          .map(s => s.videoId || s.youtubeId)
+          .filter(id => id && id !== '')
+          .slice(0, 40);
+
+        if (nextIds.length > 1) {
+          player.loadPlaylist(nextIds, 0);
+        } else {
+          player.loadVideoById(activeId);
+        }
+      }
+    }
+  }, [currentSong, player, playerType, queue, currentIndex]);
+
   const onPlayerReady: YouTubeProps['onReady'] = (event) => {
     console.log('YouTube Player Ready, restoring progress if any:', progress);
     setPlayer(event.target);
@@ -520,6 +555,29 @@ export default function Player() {
   const onPlayerStateChange: YouTubeProps['onStateChange'] = (event) => {
     console.log('YouTube State Change:', event.data);
     
+    // Status tracking for sync
+    if (event.data === 1 || event.data === 2) {
+      try {
+        const url = event.target.getVideoUrl();
+        const videoId = currentSong?.videoId || currentSong?.youtubeId;
+        
+        if (url && videoId) {
+          // If the URL contains a DIFFERENT video ID than our store, it means YouTube skipped internally
+          // Check if the current actual URL has our activeId
+          if (!url.includes(videoId)) {
+            console.log('YouTube Internal Transition Detected! Syncing HarmonyStore...');
+            isInternalSkip.current = true;
+            usePlayerStore.getState().next();
+          } else {
+            // Updated our tracking
+            lastKnownVideoId.current = videoId;
+          }
+        }
+      } catch (e) {
+        console.warn('Sync check failed:', e);
+      }
+    }
+
     if (event.data === -1 && isPlaying) {
       setTimeout(() => {
         try {
@@ -534,21 +592,9 @@ export default function Player() {
       next();
     }
     
-    // Handle YouTube's internal playlist auto-skipping (from native ⏭️ buttons)
     if (event.data === 1 && playerType === 'youtube') { // Playing
       console.log('Video is playing');
       setDuration(event.target.getDuration());
-      
-      try {
-        const url = event.target.getVideoUrl();
-        const activeId = currentSong?.videoId || currentSong?.youtubeId;
-        // If the URL changed to a different video, it means the YouTube player skipped internally
-        if (url && activeId && !url.includes(activeId)) {
-          console.log('YouTube internal skip detected. Syncing Harmony store...');
-          // Use store.next() to keep everything in sync
-          usePlayerStore.getState().next();
-        }
-      } catch (e) {}
       
       if (hasInteracted && canUnmute.current) {
         // Quick unmute if user has already interacted
@@ -621,16 +667,12 @@ export default function Player() {
   };
 
   const ytOpts: YouTubeProps['opts'] = useMemo(() => {
-    // Method: Queue Injection
-    // We pass the next 40 songs as a 'playlist' to the YouTube player.
-    // This tricks the OS (iOS/Android) into seeing a real queue, making the ⏭️ button appear.
-    const videoId = currentSong?.videoId || currentSong?.youtubeId;
-    const nextIds = queue
+    // We only provide the initial playlist. Future changes are handled via API to avoid re-mounting.
+    const initialPlaylist = queue
       .slice(currentIndex)
       .map(s => s.videoId || s.youtubeId)
       .filter(id => id && id !== '')
-      .slice(0, 40)
-      .join(',');
+      .slice(0, 40);
 
     return {
       height: '100%',
@@ -641,18 +683,20 @@ export default function Player() {
         disablekb: 1,
         fs: 0,
         modestbranding: 1,
-        rel: 0,
+        rel: 1,
         showinfo: 0,
         enablejsapi: 1,
         widget_referrer: window.location.href,
         mute: 1,
         playsinline: 1,
         origin: window.location.origin,
-        // The current video ID must be either the first in the playlist or set as videoId
-        playlist: nextIds || undefined,
+        listType: initialPlaylist.length > 1 ? 'playlist' : undefined,
+        playlist: initialPlaylist.length > 1 ? initialPlaylist.join(',') : undefined,
       },
     };
-  }, [playerMode, queue, currentIndex, currentSong]);
+    // Crucially: omit currentIndex/currentSong from dependencies to prevent re-renders on skip
+    // We handle skipping via the side-effect useEffect [currentSong]
+  }, [playerMode, queue]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -752,7 +796,7 @@ export default function Player() {
           )}
           style={{ transform: `scale(${videoZoom})` }}>
             <YouTube 
-              videoId={currentSong.videoId || currentSong.youtubeId} 
+              key={playerType} // Only re-mount if player type changes
               opts={ytOpts} 
               onReady={onPlayerReady} 
               onStateChange={onPlayerStateChange} 
