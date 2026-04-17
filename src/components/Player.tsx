@@ -534,9 +534,21 @@ export default function Player() {
       next();
     }
     
-    if (event.data === 1) { // Playing
+    // Handle YouTube's internal playlist auto-skipping (from native ⏭️ buttons)
+    if (event.data === 1 && playerType === 'youtube') { // Playing
       console.log('Video is playing');
       setDuration(event.target.getDuration());
+      
+      try {
+        const url = event.target.getVideoUrl();
+        const activeId = currentSong?.videoId || currentSong?.youtubeId;
+        // If the URL changed to a different video, it means the YouTube player skipped internally
+        if (url && activeId && !url.includes(activeId)) {
+          console.log('YouTube internal skip detected. Syncing Harmony store...');
+          // Use store.next() to keep everything in sync
+          usePlayerStore.getState().next();
+        }
+      } catch (e) {}
       
       if (hasInteracted && canUnmute.current) {
         // Quick unmute if user has already interacted
@@ -608,24 +620,39 @@ export default function Player() {
     }
   };
 
-  const ytOpts: YouTubeProps['opts'] = useMemo(() => ({
-    height: '100%',
-    width: '100%',
-    playerVars: {
-      autoplay: 1,
-      controls: playerMode === 'video' ? 1 : 0,
-      disablekb: 1,
-      fs: 0,
-      modestbranding: 1,
-      rel: 0,
-      showinfo: 0,
-      enablejsapi: 1,
-      widget_referrer: window.location.href,
-      mute: 1,
-      playsinline: 1,
-      origin: window.location.origin,
-    },
-  }), [playerMode]);
+  const ytOpts: YouTubeProps['opts'] = useMemo(() => {
+    // Method: Queue Injection
+    // We pass the next 40 songs as a 'playlist' to the YouTube player.
+    // This tricks the OS (iOS/Android) into seeing a real queue, making the ⏭️ button appear.
+    const videoId = currentSong?.videoId || currentSong?.youtubeId;
+    const nextIds = queue
+      .slice(currentIndex)
+      .map(s => s.videoId || s.youtubeId)
+      .filter(id => id && id !== '')
+      .slice(0, 40)
+      .join(',');
+
+    return {
+      height: '100%',
+      width: '100%',
+      playerVars: {
+        autoplay: 1,
+        controls: playerMode === 'video' ? 1 : 0,
+        disablekb: 1,
+        fs: 0,
+        modestbranding: 1,
+        rel: 0,
+        showinfo: 0,
+        enablejsapi: 1,
+        widget_referrer: window.location.href,
+        mute: 1,
+        playsinline: 1,
+        origin: window.location.origin,
+        // The current video ID must be either the first in the playlist or set as videoId
+        playlist: nextIds || undefined,
+      },
+    };
+  }, [playerMode, queue, currentIndex, currentSong]);
 
   useEffect(() => {
     const interval = setInterval(() => {
