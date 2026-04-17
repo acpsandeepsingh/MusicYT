@@ -8,6 +8,9 @@ import { Capacitor } from '@capacitor/core';
 import YouTubeExtractor from '../lib/native-bridge';
 import { cn } from '../lib/utils';
 
+// Forceful Media Session Anchor: A tiny silent mp3 to take control of media session from the OS
+const SILENT_AUDIO = "data:audio/mpeg;base64,SUQzBAAAAAABAFRyYWNrABAgAAAAYmxhbmsA//uQZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA//////////////////////////////////////////////////////////////////8AAABhTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV8=";
+
 export default function Player() {
   const { 
     currentSong, 
@@ -44,6 +47,8 @@ export default function Player() {
   const lastUnmuteAttempt = useRef<number>(0);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const inactivityTimeout = useRef<number | null>(null);
+  const metadataSyncTimer = useRef<number | null>(null);
+  const silentAnchorRef = useRef<HTMLAudioElement | null>(null);
 
   const handleSeek = useCallback((pos: number) => {
     if (playerType === 'youtube' && player) {
@@ -205,44 +210,29 @@ export default function Player() {
     togglePlay();
   };
 
-  // Media Session Integration
+  // Media Session Integration - Aggressive Sync
   useEffect(() => {
     if (!currentSong || !('mediaSession' in navigator)) return;
 
-    const syncMetadata = () => {
+    const updateMetadata = () => {
       try {
-        const { queue, currentIndex } = usePlayerStore.getState();
-        
-        // Find current index accurately
+        const state = usePlayerStore.getState();
+        const { queue } = state;
         const realIndex = queue.findIndex(s => s.id === currentSong.id);
-        const actualIndex = realIndex !== -1 ? realIndex : currentIndex;
-        
-        const nextIndex = (actualIndex + 1) % queue.length;
+        const nextIndex = (realIndex + 1) % queue.length;
         const nextSong = queue.length > 1 ? queue[nextIndex] : null;
-        
-        // Calculate remaining songs
-        const remainingAfterNext = queue.length > 2 ? queue.length - (actualIndex + 2) : 0;
-        
-        // VISIBILITY STRATEGY: 
-        // 1. Put Next Song info in the ARTIST field as requested.
-        // 2. Also put it in the ALBUM field for backup.
-        // 3. Use standard bullet points for clean OS rendering.
         
         let artistDisplay = currentSong.artist;
         let albumDisplay = currentSong.album || 'Harmony Stream';
 
         if (nextSong && nextSong.id !== currentSong.id) {
-          // Exactly as requested: "Artist • Next: Song Title (+X more)"
-          const moreSuffix = remainingAfterNext > 0 ? ` (+${remainingAfterNext} more)` : '';
-          artistDisplay = `${currentSong.artist} • Next: ${nextSong.title}${moreSuffix}`;
-          
-          // Album as secondary info source
-          albumDisplay = `⏭️ Next Up: ${nextSong.title}`;
+          // Force visibility in multiple fields
+          artistDisplay = `${currentSong.artist} • NEXT: ${nextSong.title}`;
+          albumDisplay = `⏭️ Next: ${nextSong.title} (+${queue.length - (realIndex + 1)} in queue)`;
         }
 
-        console.log('MediaSession Force Sync:', { title: currentSong.title, artist: artistDisplay });
-
-        // Force browser to acknowledge change by clearing first
+        console.log('FORCE SYNC: Metadata update for', currentSong.title);
+        
         navigator.mediaSession.metadata = new MediaMetadata({
           title: currentSong.title,
           artist: artistDisplay,
@@ -256,30 +246,35 @@ export default function Player() {
           ],
         });
 
-        // Set playback state explicitly to trigger UI refresh
+        // Ensure playback state is correct
         navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-      } catch (error) {
-        console.warn('Media Session Metadata Error:', error);
+      } catch (e) {
+        console.warn('Metadata Sync Error:', e);
       }
     };
 
-    // Register action handlers separately for stability
     const setupHandlers = () => {
+      const actions: [MediaSessionAction, () => void][] = [
+        ['play', () => usePlayerStore.getState().togglePlay()],
+        ['pause', () => usePlayerStore.getState().togglePlay()],
+        ['nexttrack', () => {
+          console.log('MediaSession: Force Next');
+          usePlayerStore.getState().next();
+        }],
+        ['previoustrack', () => {
+          console.log('MediaSession: Force Previous');
+          usePlayerStore.getState().previous();
+        }],
+        ['stop', () => usePlayerStore.getState().togglePlay()],
+      ];
+
+      actions.forEach(([action, handler]) => {
+        try {
+          navigator.mediaSession.setActionHandler(action, handler);
+        } catch (e) {}
+      });
+
       try {
-        const actions: [MediaSessionAction, () => void][] = [
-          ['play', () => usePlayerStore.getState().togglePlay()],
-          ['pause', () => usePlayerStore.getState().togglePlay()],
-          ['nexttrack', () => usePlayerStore.getState().next()],
-          ['previoustrack', () => usePlayerStore.getState().previous()],
-          ['stop', () => usePlayerStore.getState().togglePlay()],
-        ];
-
-        actions.forEach(([action, handler]) => {
-          try {
-            navigator.mediaSession.setActionHandler(action, handler);
-          } catch (e) {}
-        });
-
         navigator.mediaSession.setActionHandler('seekto', (details) => {
           if (details.seekTime !== undefined) handleSeek(details.seekTime);
         });
@@ -288,19 +283,38 @@ export default function Player() {
       } catch (e) {}
     };
 
-    // Initial sync
-    syncMetadata();
+    // THE FORCEFUL PART: 
+    // 1. Initial Sync
+    updateMetadata();
     setupHandlers();
 
-    // Secondary sync after track starts playing to overwrite any browser defaults
-    const t1 = setTimeout(syncMetadata, 1000);
-    const t2 = setTimeout(setupHandlers, 1500);
+    // 2. Clear any existing timers
+    if (metadataSyncTimer.current) window.clearTimeout(metadataSyncTimer.current);
+
+    // 3. Re-sync multiple times to win against YouTube hijacking
+    const syncDelays = [500, 1500, 3000, 6000];
+    const timers = syncDelays.map(delay => setTimeout(updateMetadata, delay));
 
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      timers.forEach(t => clearTimeout(t));
+      if (metadataSyncTimer.current) clearTimeout(metadataSyncTimer.current);
     };
-  }, [currentSong, queue, currentIndex, isPlaying, handleSeek]);
+  }, [currentSong, queue, isPlaying, handleSeek]);
+
+  // The Silent Audio Anchor Logic
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    if (isPlaying) {
+      if (silentAnchorRef.current) {
+        silentAnchorRef.current.play().catch(() => {
+          console.log('Silent anchor blocked, waiting for interaction');
+        });
+      }
+    } else {
+      if (silentAnchorRef.current) silentAnchorRef.current.pause();
+    }
+  }, [isPlaying]);
 
   useEffect(() => {
     if ('mediaSession' in navigator && duration > 0) {
@@ -728,6 +742,12 @@ export default function Player() {
             onError={handleAudioError}
             autoPlay={isPlaying}
             crossOrigin="anonymous"
+          />
+          <audio 
+            ref={silentAnchorRef}
+            src={SILENT_AUDIO}
+            loop
+            className="hidden"
           />
         </div>
 
