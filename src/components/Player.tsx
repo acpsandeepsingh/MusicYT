@@ -189,150 +189,8 @@ export default function Player() {
   }, [isPlaying, playerType, player, hasInteracted]);
 
   const handleTogglePlay = () => {
-    console.log('User toggled play/pause');
-    setHasInteracted(true);
-    canUnmute.current = true;
-    
-    if (player && playerType === 'youtube') {
-      try {
-        if (!isPlaying) {
-          player.playVideo();
-        } else {
-          player.pauseVideo();
-        }
-      } catch (e) {
-        console.error('Error in handleTogglePlay (YouTube):', e);
-      }
-    } else if (audioRef.current && playerType === 'audio') {
-      if (!isPlaying) {
-        audioRef.current.play().catch(() => {});
-      } else {
-        audioRef.current.pause();
-      }
-    }
-    
-    togglePlay();
+    performMediaAction(isPlaying ? 'pause' : 'play');
   };
-
-  // Media Session Integration - Aggressive Metadata Sync
-  useEffect(() => {
-    if (!currentSong || !('mediaSession' in navigator)) return;
-
-    const updateMetadata = () => {
-      try {
-        const state = usePlayerStore.getState();
-        const { queue } = state;
-        const realIndex = queue.findIndex(s => s.id === currentSong.id);
-        const nextIndex = (realIndex + 1) % queue.length;
-        const nextSong = queue.length > 1 ? queue[nextIndex] : null;
-        
-        let artistDisplay = currentSong.artist;
-        let albumDisplay = currentSong.album || 'Harmony Stream';
-
-        if (nextSong && nextSong.id !== currentSong.id) {
-          artistDisplay = `${currentSong.artist} • NEXT: ${nextSong.title}`;
-          albumDisplay = `⏭️ Next: ${nextSong.title} (+${queue.length - (realIndex + 1)} in queue)`;
-        }
-
-        console.log('MEDIA_SYNC: Updating metadata for', currentSong.title);
-        
-        navigator.mediaSession.metadata = new MediaMetadata({
-          title: currentSong.title,
-          artist: artistDisplay,
-          album: albumDisplay,
-          artwork: [
-            { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/jpeg' },
-            { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/jpeg' },
-            { src: getSongCoverUrl(currentSong, 'hqdefault'), sizes: '192x192', type: 'image/jpeg' },
-            { src: getSongCoverUrl(currentSong, 'sddefault'), sizes: '256x256', type: 'image/jpeg' },
-            { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/jpeg' },
-          ],
-        });
-      } catch (e) {
-        console.warn('Metadata Sync Error:', e);
-      }
-    };
-
-    updateMetadata();
-    
-    // Multiple syncs to ensure we stick through iframe changes
-    const timers = [1000, 3000, 7000].map(delay => setTimeout(updateMetadata, delay));
-
-    return () => {
-      timers.forEach(t => clearTimeout(t));
-    };
-  }, [currentSong, queue]);
-
-  useEffect(() => {
-    if (!('mediaSession' in navigator)) return;
-
-    console.log('MediaSession: Registering handlers with type', playerType);
-
-    const handlePlayAction = () => {
-      console.log('MediaSession: Play Clicked');
-      const state = usePlayerStore.getState();
-      if (!state.isPlaying) {
-        if (state.playerType === 'youtube' && state.player) state.player.playVideo();
-        if (state.playerType === 'audio' && audioRef.current) audioRef.current.play();
-        state.togglePlay();
-      }
-    };
-
-    const handlePauseAction = () => {
-      console.log('MediaSession: Pause Clicked');
-      const state = usePlayerStore.getState();
-      if (state.isPlaying) {
-        if (state.playerType === 'youtube' && state.player) state.player.pauseVideo();
-        if (state.playerType === 'audio' && audioRef.current) audioRef.current.pause();
-        state.togglePlay();
-      }
-    };
-
-    const handleNextAction = () => {
-      console.log('MediaSession: Next Clicked (Direct API Path)');
-      const state = usePlayerStore.getState();
-      if (state.playerType === 'youtube' && state.player) {
-        // Use YouTube's native skip to satisfy the OS "Next" signal
-        state.player.nextVideo();
-      } else {
-        state.next();
-      }
-    };
-
-    const handlePrevAction = () => {
-      console.log('MediaSession: Previous Clicked (Direct API Path)');
-      const state = usePlayerStore.getState();
-      if (state.playerType === 'youtube' && state.player) {
-        state.player.previousVideo();
-      } else {
-        state.previous();
-      }
-    };
-
-    const actions: [MediaSessionAction, () => void][] = [
-      ['play', handlePlayAction],
-      ['pause', handlePauseAction],
-      ['nexttrack', handleNextAction],
-      ['previoustrack', handlePrevAction],
-      ['stop', handlePauseAction],
-    ];
-
-    actions.forEach(([action, handler]) => {
-      try {
-        navigator.mediaSession.setActionHandler(action, handler);
-      } catch (e) {
-        console.warn(`Action failed: ${action}`, e);
-      }
-    });
-
-    try {
-      navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime !== undefined) handleSeek(details.seekTime);
-      });
-    } catch (e) {}
-
-    console.log('MediaSession: Handlers registered successfully');
-  }, [handleSeek, playerType]);
 
   // The Silent Audio Anchor Logic - Permanent context
   useEffect(() => {
@@ -445,6 +303,114 @@ export default function Player() {
     };
   }, [currentSong]);
 
+  // Direct Command Handlers for Media Session (Native responsiveness)
+  const performMediaAction = useCallback((action: 'play' | 'pause' | 'next' | 'prev') => {
+    const state = usePlayerStore.getState();
+    const { player, playerType } = state;
+
+    console.log(`MediaAction: ${action} triggered`);
+
+    if (action === 'play') {
+      if (playerType === 'youtube' && player) player.playVideo?.();
+      if (playerType === 'audio' && audioRef.current) audioRef.current.play().catch(() => {});
+      if (!state.isPlaying) state.togglePlay();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    } else if (action === 'pause') {
+      if (playerType === 'youtube' && player) player.pauseVideo?.();
+      if (playerType === 'audio' && audioRef.current) audioRef.current.pause();
+      if (state.isPlaying) state.togglePlay();
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    } else if (action === 'next') {
+      // Use direct player skip if available to keep session alive, otherwise use store
+      if (playerType === 'youtube' && player) {
+        player.nextVideo?.();
+      } else {
+        state.next();
+      }
+    } else if (action === 'prev') {
+      if (playerType === 'youtube' && player) {
+        player.previousVideo?.();
+      } else {
+        state.previous();
+      }
+    }
+  }, [player]);
+
+  const updateMediaSessionMetadata = useCallback(() => {
+    if (!currentSong || !('mediaSession' in navigator)) return;
+
+    try {
+      const { queue } = usePlayerStore.getState();
+      const realIndex = queue.findIndex(s => s.id === currentSong.id);
+      const nextIndex = (realIndex + 1) % queue.length;
+      const nextSong = queue.length > 1 ? queue[nextIndex] : null;
+
+      let artistDisplay = currentSong.artist;
+      if (nextSong && nextSong.id !== currentSong.id) {
+        artistDisplay = `${currentSong.artist} • NEXT: ${nextSong.title}`;
+      }
+
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.title,
+        artist: artistDisplay,
+        album: nextSong ? `Next: ${nextSong.title}` : (currentSong.album || 'Harmony Stream'),
+        artwork: [
+          { src: getSongCoverUrl(currentSong, 'default'), sizes: '96x96', type: 'image/jpeg' },
+          { src: getSongCoverUrl(currentSong, 'mqdefault'), sizes: '128x128', type: 'image/jpeg' },
+          { src: getSongCoverUrl(currentSong, 'hqdefault'), sizes: '192x192', type: 'image/jpeg' },
+          { src: getSongCoverUrl(currentSong, 'sddefault'), sizes: '256x256', type: 'image/jpeg' },
+          { src: getSongCoverUrl(currentSong, 'maxresdefault'), sizes: '512x512', type: 'image/jpeg' },
+        ],
+      });
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    } catch (e) {}
+  }, [currentSong, isPlaying, queue]);
+
+  const setupMediaSessionHandlers = useCallback(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    console.log('RE-CLAIMING Media Session Handlers');
+
+    const actions: [MediaSessionAction, () => void][] = [
+      ['play', () => performMediaAction('play')],
+      ['pause', () => performMediaAction('pause')],
+      ['nexttrack', () => performMediaAction('next')],
+      ['previoustrack', () => performMediaAction('prev')],
+      ['stop', () => performMediaAction('pause')],
+    ];
+
+    actions.forEach(([action, handler]) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch (e) {}
+    });
+
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime !== undefined) handleSeek(details.seekTime);
+      });
+    } catch (e) {}
+  }, [performMediaAction, handleSeek]);
+
+  // Aggressive Media Session Guardian
+  useEffect(() => {
+    if (!('mediaSession' in navigator) || !currentSong) return;
+
+    // 1. Initial setup
+    updateMediaSessionMetadata();
+    setupMediaSessionHandlers();
+
+    // 2. Heartbeat to re-claim session from YouTube's internal resets
+    const heartbeat = setInterval(() => {
+      if (isPlaying) {
+        updateMediaSessionMetadata();
+        setupMediaSessionHandlers();
+      }
+    }, 5000); 
+
+    return () => clearInterval(heartbeat);
+  }, [currentSong, isPlaying, updateMediaSessionMetadata, setupMediaSessionHandlers]);
+
   // Handle Play/Pause synchronization
   useEffect(() => {
     try {
@@ -522,9 +488,13 @@ export default function Player() {
     // we MUST NOT call loadPlaylist/loadVideoById as it resets the Media Session.
     if (activeId !== lastKnownVideoId.current) {
       if (isInternalSkip.current) {
-        console.log('API SYNC: Song changed internally, already correct in player.');
+        console.log('API SYNC: Confirmed internal move to', activeId);
         lastKnownVideoId.current = activeId;
         isInternalSkip.current = false;
+        
+        // Even if skipped internally, we re-claim handlers to be safe
+        updateMediaSessionMetadata();
+        setupMediaSessionHandlers();
         return;
       }
 
@@ -593,26 +563,40 @@ export default function Player() {
     next();
   };
 
+  // Enhanced check on every state change to keep OS and App perfectly aligned
+  const syncStoreWithPlayerIndex = useCallback((event: any) => {
+    try {
+      const ytPlayer = event.target;
+      const currentIndexInPlaylist = ytPlayer.getPlaylistIndex();
+      const state = usePlayerStore.getState();
+      
+      // If YouTube's internal index moved but ours hasn't
+      if (currentIndexInPlaylist !== -1 && currentIndexInPlaylist !== 0) {
+        console.log('SYNC: YouTube moved to track index', currentIndexInPlaylist);
+        // We always use playlist index 0 for the "Current" in our manual loads,
+        // so if it's not 0, it means it naturally progressed or was skipped via OS.
+        isInternalSkip.current = true;
+        state.next();
+        // Force YouTube back to its index 0 for the NEW track we just set in store
+        // (This happens in the useEffect [currentSong] next)
+      } else {
+        // Double check URL for extra safety
+        const url = ytPlayer.getVideoUrl();
+        const videoId = state.currentSong?.videoId || state.currentSong?.youtubeId;
+        if (url && videoId && !url.includes(videoId)) {
+          console.log('SYNC: Detected track switch via URL mismatch.');
+          isInternalSkip.current = true;
+          state.next();
+        }
+      }
+    } catch (e) {}
+  }, []);
+
   const onPlayerStateChange: YouTubeProps['onStateChange'] = (event) => {
     console.log('YouTube State Change:', event.data);
     
-    // Enhanced check on every state change to keep OS and App perfectly aligned
     if (event.data === 1 || event.data === 2 || event.data === 3) {
-      try {
-        const url = event.target.getVideoUrl();
-        const videoId = currentSong?.videoId || currentSong?.youtubeId;
-        
-        if (url && videoId) {
-          if (!url.includes(videoId)) {
-            // This is the OS/Playlist skip detection
-            console.log('SYNC: Detected track switch via native controls.');
-            isInternalSkip.current = true;
-            usePlayerStore.getState().next();
-          } else {
-            lastKnownVideoId.current = videoId;
-          }
-        }
-      } catch (e) {}
+      syncStoreWithPlayerIndex(event);
     }
 
     if (event.data === -1 && isPlaying) {
@@ -630,8 +614,12 @@ export default function Player() {
     }
     
     if (event.data === 1 && playerType === 'youtube') { // Playing
-      console.log('Video is playing');
+      console.log('Video is playing - Triggering Session Claim');
       setDuration(event.target.getDuration());
+      
+      // WINNING THE BATTLE: Re-apply handlers the MOMENT YouTube finishes loading (state changes to 1)
+      updateMediaSessionMetadata();
+      setupMediaSessionHandlers();
       
       if (hasInteracted && canUnmute.current) {
         // Quick unmute if user has already interacted
