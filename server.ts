@@ -16,6 +16,31 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // YouTube search proxy
+  app.get("/api/search", async (req, res) => {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: "Missing q" });
+
+    const key = process.env.NEXT_PUBLIC_YOUTUBE_API_KEY || process.env.YOUTUBE_API_KEY;
+    if (!key) {
+      return res.status(500).json({ error: "YouTube API key not configured" });
+    }
+
+    try {
+      const response = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?part=snippet&maxResults=20&q=${encodeURIComponent(q as string)}&type=video&videoCategoryId=10&key=${key}`
+      );
+      if (!response.ok) {
+        throw new Error(`YouTube API error: ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("[Search] Failed:", error);
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
   // Audio extraction proxy
   app.get("/api/extract", async (req, res) => {
     const { id } = req.query;

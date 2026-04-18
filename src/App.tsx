@@ -271,6 +271,42 @@ export default function App() {
 
   const allSongs = Array.from(new Map([...Object.values(genreData).flat(), ...likedSongs].map(s => [s.id, s])).values()) as Song[];
   
+  const [youtubeResults, setYoutubeResults] = useState<Song[]>([]);
+
+  useEffect(() => {
+    if (searchQuery.trim().length > 2) {
+      const timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+          if (res.ok) {
+            const data = await res.json();
+            const items = data.items || [];
+            const songs = items.map((item: any) => {
+              const videoId = item.id?.videoId;
+              if (!videoId) return null;
+              return {
+                id: videoId,
+                title: item.snippet.title,
+                artist: item.snippet.channelTitle,
+                thumbnailUrl: item.snippet.thumbnails.medium?.url || item.snippet.thumbnails.default?.url,
+                videoId: videoId,
+                youtubeId: videoId,
+                audioUrl: `/api/extract?id=${videoId}`,
+                album: 'YouTube'
+              } as Song;
+            }).filter(Boolean) as Song[];
+            setYoutubeResults(songs);
+          }
+        } catch (e) {
+          console.error("Youtube search error:", e);
+        }
+      }, 800);
+      return () => clearTimeout(timer);
+    } else {
+      setYoutubeResults([]);
+    }
+  }, [searchQuery]);
+
   const searchResults = searchQuery.trim() ? allSongs.filter(s => {
     const query = searchQuery.toLowerCase();
     return s.title.toLowerCase().includes(query) ||
@@ -323,7 +359,7 @@ export default function App() {
                 <SongCard key={song.id} song={song} />
               ))}
             </div>
-          ) : searchQuery.trim() ? (
+          ) : searchQuery.trim() && youtubeResults.length === 0 ? (
             <div className="text-center py-20">
               <p className="text-zinc-400 text-lg">No useful content found for your search.</p>
             </div>
@@ -341,6 +377,20 @@ export default function App() {
                   <h3 className="text-xl font-bold">{genre.label}</h3>
                 </div>
               ))}
+            </div>
+          )}
+
+          {searchQuery.trim() && youtubeResults.length > 0 && (
+            <div className="mt-12">
+              <h2 className="text-2xl font-black tracking-tighter mb-6 flex items-center gap-2">
+                YouTube Results
+                <span className="text-xs font-medium px-2 py-0.5 bg-white/10 rounded-full text-zinc-400">Global</span>
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mb-12">
+                {youtubeResults.map(song => (
+                  <SongCard key={song.id} song={song} />
+                ))}
+              </div>
             </div>
           )}
         </section>
