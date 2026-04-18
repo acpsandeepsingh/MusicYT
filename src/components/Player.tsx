@@ -8,9 +8,8 @@ import { Capacitor } from '@capacitor/core';
 import YouTubeExtractor from '../lib/native-bridge';
 import { cn } from '../lib/utils';
 
-// Forceful Media Session Anchor: A MUCH longer silent mp3 to take control of media session from the OS
-// This is 30 seconds of silence to reduce loop overhead and prevent OS metadata clearing.
-const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAABAFRyYWNrABAgAAAAYmxhbmsA//uQZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAAlAAALXwAHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcX//////////////////////////////////////////////////////////////////8AAABhTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV8=";
+// Forceful Media Session Anchor: A valid 2-second silent MP3 base64
+const SILENT_AUDIO = "data:audio/mp3;base64,SUQzBAAAAAABAFRyYWNrABAgAAAAYmxhbmsA//uQZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgAABhTEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV8=";
 
 export default function Player() {
   const { 
@@ -147,22 +146,33 @@ export default function Player() {
     const primeAudio = () => {
       console.log('User interaction detected, priming audio context');
       setHasInteracted(true);
-      // Try to play/pause a silent audio to unlock the context
+      
+      // Unlock all potential audio contexts
       if (audioRef.current) {
         audioRef.current.play().then(() => {
           audioRef.current?.pause();
         }).catch(() => {});
       }
+      
+      if (silentAnchorRef.current) {
+        silentAnchorRef.current.play().then(() => {
+          if (!isPlaying) silentAnchorRef.current?.pause();
+        }).catch(() => {});
+      }
+
       window.removeEventListener('mousedown', primeAudio);
       window.removeEventListener('keydown', primeAudio);
+      window.removeEventListener('touchstart', primeAudio);
     };
     window.addEventListener('mousedown', primeAudio);
     window.addEventListener('keydown', primeAudio);
+    window.addEventListener('touchstart', primeAudio);
     return () => {
       window.removeEventListener('mousedown', primeAudio);
       window.removeEventListener('keydown', primeAudio);
+      window.removeEventListener('touchstart', primeAudio);
     };
-  }, []);
+  }, [isPlaying]);
 
   useEffect(() => {
     if (isPlaying && playerType === 'youtube' && player) {
@@ -202,7 +212,13 @@ export default function Player() {
     const startAnchor = async () => {
       try {
         if (isPlaying) {
-          await anchor.play();
+          // Force a small delay to ensure it starts AFTER any iframe reset
+          setTimeout(async () => {
+            try {
+              await anchor.play();
+              console.log('Anchor Audio Playing - Holding Media Session');
+            } catch (e) {}
+          }, 500);
         } else {
           anchor.pause();
         }
@@ -213,7 +229,7 @@ export default function Player() {
 
     startAnchor();
     
-    // Force playback state
+    // Explicitly update playback state here too
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
   }, [isPlaying]);
 
@@ -304,52 +320,24 @@ export default function Player() {
   }, [currentSong]);
 
   // Direct Command Handlers for Media Session (Native responsiveness)
-  const performMediaAction = useCallback((action: 'play' | 'pause' | 'next' | 'prev') => {
-    const state = usePlayerStore.getState();
-    const { player, playerType } = state;
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
 
-    console.log(`MediaAction: ${action} triggered`);
-
-    if (action === 'play') {
-      if (playerType === 'youtube' && player) player.playVideo?.();
-      if (playerType === 'audio' && audioRef.current) audioRef.current.play().catch(() => {});
-      if (!state.isPlaying) state.togglePlay();
-      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
-    } else if (action === 'pause') {
-      if (playerType === 'youtube' && player) player.pauseVideo?.();
-      if (playerType === 'audio' && audioRef.current) audioRef.current.pause();
-      if (state.isPlaying) state.togglePlay();
-      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-    } else if (action === 'next') {
-      // Use direct player skip if available to keep session alive, otherwise use store
-      if (playerType === 'youtube' && player) {
-        player.nextVideo?.();
-      } else {
-        state.next();
-      }
-    } else if (action === 'prev') {
-      if (playerType === 'youtube' && player) {
-        player.previousVideo?.();
-      } else {
-        state.previous();
-      }
-    }
-  }, [player]);
-
+  // --- MEDIA SESSION CORE (Hoisted for reliability) ---
   const updateMediaSessionMetadata = useCallback(() => {
     if (!currentSong || !('mediaSession' in navigator)) return;
-
     try {
       const { queue } = usePlayerStore.getState();
       const realIndex = queue.findIndex(s => s.id === currentSong.id);
       const nextIndex = (realIndex + 1) % queue.length;
       const nextSong = queue.length > 1 ? queue[nextIndex] : null;
-
       let artistDisplay = currentSong.artist;
       if (nextSong && nextSong.id !== currentSong.id) {
         artistDisplay = `${currentSong.artist} • NEXT: ${nextSong.title}`;
       }
-
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentSong.title,
         artist: artistDisplay,
@@ -366,11 +354,40 @@ export default function Player() {
     } catch (e) {}
   }, [currentSong, isPlaying, queue]);
 
+  const performMediaAction = useCallback((action: 'play' | 'pause' | 'next' | 'prev') => {
+    const state = usePlayerStore.getState();
+    const { player, playerType } = state;
+    console.log(`MediaAction: ${action} triggered, Current State: ${state.isPlaying ? 'Playing' : 'Paused'}`);
+    if (action === 'play') {
+      if (playerType === 'youtube' && player) player.playVideo?.();
+      if (playerType === 'audio' && audioRef.current) audioRef.current.play().catch(() => {});
+      if (!state.isPlaying) usePlayerStore.setState({ isPlaying: true });
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    } else if (action === 'pause') {
+      if (playerType === 'youtube' && player) player.pauseVideo?.();
+      if (playerType === 'audio' && audioRef.current) audioRef.current.pause();
+      if (state.isPlaying) usePlayerStore.setState({ isPlaying: false });
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+    } else if (action === 'next') {
+      if (playerType === 'youtube' && player) {
+        player.nextVideo?.();
+        setTimeout(updateMediaSessionMetadata, 200);
+      } else {
+        state.next();
+      }
+    } else if (action === 'prev') {
+      if (playerType === 'youtube' && player) {
+        player.previousVideo?.();
+        setTimeout(updateMediaSessionMetadata, 200);
+      } else {
+        state.previous();
+      }
+    }
+  }, [player, updateMediaSessionMetadata]);
+
   const setupMediaSessionHandlers = useCallback(() => {
     if (!('mediaSession' in navigator)) return;
-
     console.log('RE-CLAIMING Media Session Handlers');
-
     const actions: [MediaSessionAction, () => void][] = [
       ['play', () => performMediaAction('play')],
       ['pause', () => performMediaAction('pause')],
@@ -378,13 +395,11 @@ export default function Player() {
       ['previoustrack', () => performMediaAction('prev')],
       ['stop', () => performMediaAction('pause')],
     ];
-
     actions.forEach(([action, handler]) => {
       try {
         navigator.mediaSession.setActionHandler(action, handler);
       } catch (e) {}
     });
-
     try {
       navigator.mediaSession.setActionHandler('seekto', (details) => {
         if (details.seekTime !== undefined) handleSeek(details.seekTime);
@@ -396,19 +411,27 @@ export default function Player() {
   useEffect(() => {
     if (!('mediaSession' in navigator) || !currentSong) return;
 
-    // 1. Initial setup
-    updateMediaSessionMetadata();
-    setupMediaSessionHandlers();
+    const claim = () => {
+      console.log('Claiming Media Session for:', currentSong.title);
+      updateMediaSessionMetadata();
+      setupMediaSessionHandlers();
+    };
 
-    // 2. Heartbeat to re-claim session from YouTube's internal resets
+    claim();
+    
+    // Multiple claim attempts to defeat YouTube's persistent metadata hijacking
+    const timings = [500, 1000, 2000, 5000, 10000];
+    const timers = timings.map(delay => setTimeout(claim, delay));
+
+    // Internal heartbeat while playing
     const heartbeat = setInterval(() => {
-      if (isPlaying) {
-        updateMediaSessionMetadata();
-        setupMediaSessionHandlers();
-      }
-    }, 5000); 
+      if (isPlaying) claim();
+    }, 8000);
 
-    return () => clearInterval(heartbeat);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearInterval(heartbeat);
+    };
   }, [currentSong, isPlaying, updateMediaSessionMetadata, setupMediaSessionHandlers]);
 
   // Handle Play/Pause synchronization
@@ -471,12 +494,6 @@ export default function Player() {
       if (progressInterval.current) clearInterval(progressInterval.current);
     };
   }, [isPlaying, player, playerType, updateProgress]);
-
-  const formatTime = (time: number) => {
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
 
   useEffect(() => {
     if (!player || playerType !== 'youtube' || !currentSong) return;
@@ -618,9 +635,21 @@ export default function Player() {
       setDuration(event.target.getDuration());
       
       // WINNING THE BATTLE: Re-apply handlers the MOMENT YouTube finishes loading (state changes to 1)
+      // We do it immediately AND with a slight delay because YouTube's internal engine 
+      // often overwrites metadata multiple times during the first 1000ms of playback.
       updateMediaSessionMetadata();
       setupMediaSessionHandlers();
       
+      setTimeout(() => {
+        updateMediaSessionMetadata();
+        setupMediaSessionHandlers();
+      }, 1000);
+
+      setTimeout(() => {
+        updateMediaSessionMetadata();
+        setupMediaSessionHandlers();
+      }, 3000);
+
       if (hasInteracted && canUnmute.current) {
         // Quick unmute if user has already interacted
         try {
@@ -843,7 +872,8 @@ export default function Player() {
             ref={silentAnchorRef}
             src={SILENT_AUDIO}
             loop
-            className="hidden"
+            className="fixed -top-10 -left-10 w-1 h-1 pointer-events-none opacity-0"
+            style={{ visibility: 'visible', display: 'block' }}
           />
         </div>
 
