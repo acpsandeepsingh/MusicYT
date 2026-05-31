@@ -261,11 +261,14 @@ export default function App() {
     return () => unsubscribes.forEach(unsub => unsub());
   }, []);
 
-  // Update global queue when data changes
+  // Update global queue when data changes (Initial Load)
   useEffect(() => {
-    const allSongs = Object.values(genreData).flat() as Song[];
-    if (allSongs.length > 0) {
-      setQueue(allSongs);
+    const { queue } = usePlayerStore.getState();
+    if (queue.length === 0) {
+      const allSongs = Object.values(genreData).flat() as Song[];
+      if (allSongs.length > 0) {
+        setQueue(allSongs);
+      }
     }
   }, [genreData, setQueue]);
 
@@ -356,7 +359,14 @@ export default function App() {
           {searchResults.length > 0 ? (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
               {searchResults.map(song => (
-                <SongCard key={song.id} song={song} />
+                <SongCard 
+                  key={song.id} 
+                  song={song} 
+                  onClick={() => {
+                    const { playWithQueue } = usePlayerStore.getState();
+                    playWithQueue(song, [...searchResults, ...youtubeResults]);
+                  }}
+                />
               ))}
             </div>
           ) : searchQuery.trim() && youtubeResults.length === 0 ? (
@@ -388,7 +398,14 @@ export default function App() {
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 mb-12">
                 {youtubeResults.map(song => (
-                  <SongCard key={song.id} song={song} />
+                  <SongCard 
+                    key={song.id} 
+                    song={song} 
+                    onClick={() => {
+                      const { playWithQueue } = usePlayerStore.getState();
+                      playWithQueue(song, [...searchResults, ...youtubeResults]);
+                    }}
+                  />
                 ))}
               </div>
             </div>
@@ -440,7 +457,11 @@ export default function App() {
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
             {playlistSongs.map(song => (
-              <SongCard key={song.id} song={song} />
+              <SongCard 
+                key={song.id} 
+                song={song} 
+                onClick={() => usePlayerStore.getState().playWithQueue(song, playlistSongs)}
+              />
             ))}
           </div>
           {!playlistLoading && playlistSongs.length === 0 && (
@@ -542,7 +563,7 @@ export default function App() {
                     
                     <div className="flex items-center gap-4">
                       <button 
-                        onClick={() => setCurrentSong(featuredSong)}
+                        onClick={() => usePlayerStore.getState().playWithQueue(featuredSong, allSongs)}
                         className="px-8 py-3 bg-[#ff4e00] rounded-full font-bold flex items-center gap-2 hover:bg-[#ff6a2a] transition-all hover:scale-105 active:scale-95 shadow-lg shadow-[#ff4e00]/20"
                       >
                         <Play size={20} fill="white" />
@@ -616,7 +637,10 @@ export default function App() {
                 ) : (
                   (selectedGenre ? songs : songs.slice(0, 10)).map(song => (
                     <div key={song.id} className={selectedGenre ? "" : "min-w-[200px]"}>
-                      <SongCard song={song} />
+                      <SongCard 
+                        song={song} 
+                        onClick={() => usePlayerStore.getState().playWithQueue(song, songs)}
+                      />
                     </div>
                   ))
                 )}

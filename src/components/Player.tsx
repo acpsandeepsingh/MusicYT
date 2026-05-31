@@ -518,11 +518,14 @@ export default function Player() {
       console.log('API FORCE: Manual track change, updating player state.');
       lastKnownVideoId.current = activeId;
       
+      // Calculate dynamic slice. If currentIndex is -1, we find the song in the queue.
+      const safeIndex = currentIndex === -1 ? queue.findIndex(s => (s.videoId || s.youtubeId) === activeId) : currentIndex;
+      
       const nextIds = queue
-        .slice(currentIndex)
+        .slice(safeIndex === -1 ? 0 : safeIndex)
         .map(s => s.videoId || s.youtubeId)
         .filter(id => id && id !== '')
-        .slice(0, 40);
+        .slice(0, 50);
 
       if (nextIds.length > 1) {
         player.loadPlaylist(nextIds, 0);
@@ -723,10 +726,10 @@ export default function Player() {
   const ytOpts: YouTubeProps['opts'] = useMemo(() => {
     // We only provide the initial playlist. Future changes are handled via API to avoid re-mounting.
     const initialPlaylist = queue
-      .slice(currentIndex)
+      .slice(currentIndex === -1 ? 0 : currentIndex)
       .map(s => s.videoId || s.youtubeId)
       .filter(id => id && id !== '')
-      .slice(0, 40);
+      .slice(0, 50);
 
     return {
       height: '100%',

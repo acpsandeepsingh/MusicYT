@@ -24,6 +24,7 @@ interface PlayerState {
   setPlayerType: (type: 'youtube' | 'audio') => void;
 
   setCurrentSong: (song: Song) => void;
+  playWithQueue: (song: Song, newQueue: Song[]) => void;
   setQueue: (songs: Song[]) => void;
   togglePlay: () => void;
   setVolume: (volume: number) => void;
@@ -69,10 +70,31 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setCurrentSong: (song: Song) => {
     const { queue } = get();
-    const index = queue.findIndex(s => s.id === song.id);
+    let index = queue.findIndex(s => s.id === song.id);
+    
+    // If not in queue, add it to the start of the remaining queue
+    if (index === -1) {
+      const { currentIndex } = get();
+      const newQueue = [...queue];
+      newQueue.splice(currentIndex + 1, 0, song);
+      set({ queue: newQueue, currentIndex: currentIndex + 1 });
+      index = currentIndex + 1;
+    }
+
     set({ 
       currentSong: song, 
       currentIndex: index,
+      isPlaying: true,
+      progress: 0
+    });
+  },
+
+  playWithQueue: (song: Song, newQueue: Song[]) => {
+    const index = newQueue.findIndex(s => s.id === song.id);
+    set({ 
+      queue: newQueue,
+      currentIndex: index !== -1 ? index : 0,
+      currentSong: song,
       isPlaying: true,
       progress: 0
     });
@@ -93,7 +115,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   next: () => {
     const { queue, currentIndex } = get();
     if (queue.length === 0) return;
-    const nextIndex = (currentIndex + 1) % queue.length;
+    
+    let nextIndex;
+    if (currentIndex === -1) {
+      nextIndex = 0;
+    } else {
+      nextIndex = (currentIndex + 1) % queue.length;
+    }
+    
     const nextSong = queue[nextIndex];
     set({ currentIndex: nextIndex, currentSong: nextSong, isPlaying: true, progress: 0 });
   },
@@ -101,7 +130,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   previous: () => {
     const { queue, currentIndex } = get();
     if (queue.length === 0) return;
-    const prevIndex = (currentIndex - 1 + queue.length) % queue.length;
+    
+    let prevIndex;
+    if (currentIndex <= 0) {
+      prevIndex = queue.length - 1;
+    } else {
+      prevIndex = currentIndex - 1;
+    }
+    
     const prevSong = queue[prevIndex];
     set({ currentIndex: prevIndex, currentSong: prevSong, isPlaying: true, progress: 0 });
   },

@@ -10,10 +10,11 @@ import { cn } from '../lib/utils';
 
 interface SongCardProps {
   song: Song;
+  onClick?: () => void;
 }
 
-const SongCard: React.FC<SongCardProps> = ({ song }) => {
-  const { setCurrentSong, currentSong, isPlaying, favorites, toggleFavorite } = usePlayerStore();
+const SongCard: React.FC<SongCardProps> = ({ song, onClick }) => {
+  const { currentSong, isPlaying, favorites, toggleFavorite } = usePlayerStore();
   const isActive = currentSong?.id === song.id;
   const isFavorite = favorites.includes(song.id);
 
@@ -47,7 +48,7 @@ const SongCard: React.FC<SongCardProps> = ({ song }) => {
         "bg-white/5 p-4 rounded-xl transition-all duration-300 group cursor-pointer border border-white/5",
         isActive ? "bg-white/10 border-[#ff4e00]/30 shadow-lg shadow-[#ff4e00]/10" : "hover:bg-white/10"
       )}
-      onClick={() => setCurrentSong(song)}
+      onClick={onClick}
     >
       <div className="relative aspect-square mb-4 overflow-hidden rounded-lg shadow-xl">
         <img 
